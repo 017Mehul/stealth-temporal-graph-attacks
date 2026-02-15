@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PBL Presentation | 2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        body { background-color: #020617; color: #f8fafc; font-family: 'Plus Jakarta Sans', sans-serif; scroll-behavior: smooth; }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .gradient-text { background: linear-gradient(90deg, #60a5fa, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        #timerContainer { background: #ffffff; color: #020617; box-shadow: 0 10px 40px rgba(0,0,0,0.8); border: 3px solid #3b82f6; z-index: 1000; }
+        @keyframes flicker { 0%, 100% { background-color: #ffffff; } 50% { background-color: #fca5a5; } }
+        .timer-warning { animation: flicker 1s infinite; border: 3px solid #ef4444 !important; color: #b91c1c !important; }
+        .timer-stop { background-color: #991b1b !important; color: #ffffff !important; border: 3px solid #f87171 !important; animation: none; }
+    </style>
+</head>
+<body onload="startTimer()">
+
+    <div id="timerContainer" class="fixed bottom-10 right-10 px-8 py-4 rounded-3xl flex items-center gap-4 transition-all">
+        <i class="fas fa-hourglass-start text-blue-600 text-2xl" id="timerIcon"></i>
+        <span id="displayTime" class="text-4xl font-black font-mono tracking-tighter">00:00</span>
+    </div>
+
+    <nav class="fixed w-full z-50 glass border-b border-slate-800/50 px-8 py-4 flex justify-between items-center">
+        <div class="flex items-center gap-4">
+            <div class="bg-white p-1 rounded flex items-center justify-center shadow-md" style="height: 48px; width: 48px;">
+                <img src="mujlogo.jpg" alt="MUJ" class="h-full w-auto object-contain" onerror="this.src='https://via.placeholder.com/50?text=MUJ'">
+            </div>
+            <div class="flex flex-col text-left">
+                <span class="text-xl font-black text-white leading-none uppercase tracking-tighter">PBL <span class="text-blue-500 italic">2026</span></span>
+                <span class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">Dept. of Computer Science & Engineering</span>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-6xl mx-auto px-6 pt-48 pb-32 space-y-32">
+        
+        <section class="text-center">
+            <div class="inline-block px-4 py-1 border border-slate-800 rounded-full text-slate-500 text-[10px] font-mono mb-6 uppercase tracking-widest">
+                ID: 23FE10CSE00518
+            </div>
+
+            <h1 class="text-6xl md:text-7xl font-extrabold mb-8 uppercase leading-tight">
+                <span class="gradient-text uppercase">
+                    Stealthy Low-Rate Temporal Adversarial Attacks on Dynamic Transaction Graphs for Robust GNN-Based Fraud Detection
+                </span>
+            </h1>
+
+            <p class="text-slate-400 max-w-2xl mx-auto italic text-lg leading-relaxed border-l-2 border-blue-500/30 pl-6 text-left">
+                We hypothesize that even low-rate, temporally distributed adversarial injections in dynamic transaction graphs can significantly degrade the performance of Graph Neural Network (GNN) based fraud detection systems. Unlike high-volume perturbations, stealthy gradual injections may evade detection while manipulating model predictions over time.
+            </p>
+        </section>
+
+        <section id="problem" class="grid md:grid-cols-2 gap-12 items-stretch">
+            <div class="glass p-10 rounded-[2.5rem] flex flex-col justify-center border-l-4 border-blue-600">
+                <h2 class="text-3xl font-extrabold mb-6">Problem Statement</h2>
+                <p class="text-slate-400 leading-relaxed text-justify">
+                    Modern fraud detection systems rely heavily on Graph Neural Networks to analyze dynamic transaction graphs. However, most existing works assume static or high-volume adversarial perturbations. In real-world financial systems, fraudsters operate gradually, injecting small transactions over time to evade detection. There is limited research studying the impact of such stealthy, low-rate temporal adversarial attacks on dynamic graph-based fraud detection models.
+                </p>
+            </div>
+
+            <div class="space-y-6">
+                <div class="glass p-7 rounded-3xl border-r-4 border-blue-500/50">
+                    <h3 class="text-blue-400 font-bold text-xs uppercase tracking-widest mb-2">Literature Review / Market Research</h3>
+                    <p class="text-sm text-slate-500 italic">
+                        Prior research has explored adversarial attacks on Graph Neural Networks, including edge perturbations, node injections, and feature manipulations. Additionally, GNNs have been widely applied to fraud detection tasks. However, most adversarial studies focus on static graphs or unrealistic attack budgets, while dynamic temporal graph settings remain underexplored.
+                    </p>
+                </div>
+
+                <div class="glass p-7 rounded-3xl border-r-4 border-purple-500/50">
+                    <h3 class="text-purple-400 font-bold text-xs uppercase tracking-widest mb-2">Research Gap / Innovation</h3>
+                    <p class="text-sm text-slate-500 italic">
+                        Existing studies do not sufficiently model realistic low-rate, temporally distributed adversarial behavior in dynamic transaction graphs. There is a lack of systematic evaluation of how gradual stealth attacks affect GNN-based fraud detection systems over time.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section id="methodology" class="space-y-12">
+            <h2 class="text-4xl font-black text-center uppercase tracking-tight">System <span class="text-blue-500">Methodology</span></h2>
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="glass p-8 rounded-3xl text-center">
+                    <i class="fas fa-database text-blue-500 text-3xl mb-4"></i>
+                    <h3 class="font-bold mb-2 uppercase text-xs tracking-widest">Dataset / Input</h3>
+                    <p class="text-sm text-slate-500">
+                        Elliptic Bitcoin Transaction Dataset
+                    </p>
+                </div>
+
+                <div class="glass p-8 rounded-3xl text-center">
+                    <i class="fas fa-microchip text-purple-500 text-3xl mb-4"></i>
+                    <h3 class="font-bold mb-2 uppercase text-xs tracking-widest">Model / Architecture</h3>
+                    <p class="text-sm text-slate-500">
+                        Graph Convolutional Network (GCN)<br>
+                        Dynamic GCN + GRU Architecture
+                    </p>
+                </div>
+
+                <div class="glass p-8 rounded-3xl text-center border-2 border-green-500/20 bg-green-500/5">
+                    <i class="fab fa-python text-green-500 text-3xl mb-4"></i>
+                    <h3 class="font-bold mb-4 uppercase text-xs tracking-widest text-green-400">Live Execution</h3>
+                    <a href="https://github.com/017Mehul/stealth-temporal-graph-attacks" target="_blank" class="px-6 py-2 bg-green-600 rounded-full text-[10px] font-black hover:bg-green-500 transition shadow-lg shadow-green-900/40">
+                        VIEW CODE / DEMO
+                    </a>
+                </div>
+            </div>
+        </section>
