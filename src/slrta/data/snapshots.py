@@ -28,13 +28,14 @@ def _zscore(x: np.ndarray) -> np.ndarray:
     return (x - mu) / std
 
 
-def compute_node_features(window_df: pd.DataFrame, node_to_idx: dict, window_size: int) -> np.ndarray:
+def compute_node_features(window_df: pd.DataFrame, node_to_idx: dict, window_size: int) -> tuple[np.ndarray, np.ndarray]:
     n = len(node_to_idx)
     # features: in_deg, out_deg, total_amount, avg_amount, freq, tac, degree, log_degree
     feats = np.zeros((n, 8), dtype=np.float32)
+    degree_arr = np.zeros((n,), dtype=np.float32)
 
     if window_df.empty:
-        return feats
+        return feats, degree_arr
 
     src = window_df["source"].astype(str).to_numpy()
     dst = window_df["target"].astype(str).to_numpy()
@@ -73,8 +74,9 @@ def compute_node_features(window_df: pd.DataFrame, node_to_idx: dict, window_siz
         degree = i_deg + o_deg
         log_degree = float(np.log1p(degree))
         feats[idx] = np.array([i_deg, o_deg, tot, avg, freq, tac, degree, log_degree], dtype=np.float32)
+        degree_arr[idx] = float(degree)
 
-    return feats
+    return feats, degree_arr
 
 
 def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: int = 1, normalize_features: bool = True) -> None:
@@ -102,13 +104,49 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
         windows.append(ts_values[start : start + window_size])
         start += window_size
 
+    # Temporal states for appended features:
+    # 1) cumulative transaction count per node
+    # 2) degree growth rate: deg_t - deg_{t-1}
+    # 3) historical neighbor illicit ratio
+    cumulative_tx_count = np.zeros((len(nodes),), dtype=np.float32)
+    prev_degree = np.zeros((len(nodes),), dtype=np.float32)
+    historical_neighbors = [set() for _ in range(len(nodes))]
+    labeled_illicit = (y_global == 1)
+
     # Build cumulative snapshots: include edges with timestamp <= current window max
     for t, ts_window in enumerate(windows, start=1):
         cutoff = max(ts_window)
         wdf = clean_df[clean_df["timestamp"] <= cutoff].copy()
+        current_df = clean_df[clean_df["timestamp"].isin(ts_window)].copy()
 
         # For cumulative snapshots, window_size is the number of original timestamps in the window
-        x_np = compute_node_features(wdf, node_to_idx, window_size=len(ts_window))
+        base_feats, current_degree = compute_node_features(wdf, node_to_idx, window_size=len(ts_window))
+
+        # Historical illicit-neighbor ratio is computed before ingesting current window edges.
+        hist_illicit_ratio = np.zeros((len(nodes),), dtype=np.float32)
+        for i in range(len(nodes)):
+            nbrs = historical_neighbors[i]
+            if not nbrs:
+                continue
+            nbr_idx = np.fromiter(nbrs, dtype=np.int64)
+            labeled_mask = (y_global[nbr_idx] >= 0)
+            denom = int(labeled_mask.sum())
+            if denom == 0:
+                continue
+            num_illicit = int(labeled_illicit[nbr_idx][labeled_mask].sum())
+            hist_illicit_ratio[i] = float(num_illicit / denom)
+
+        # Update cumulative tx count using current window transactions.
+        if not current_df.empty:
+            src_idx_cur = current_df["source"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
+            dst_idx_cur = current_df["target"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
+            np.add.at(cumulative_tx_count, src_idx_cur, 1.0)
+            np.add.at(cumulative_tx_count, dst_idx_cur, 1.0)
+        degree_growth = current_degree - prev_degree
+        prev_degree = current_degree.copy()
+
+        temporal_feats = np.column_stack([cumulative_tx_count, degree_growth, hist_illicit_ratio]).astype(np.float32)
+        x_np = np.concatenate([base_feats, temporal_feats], axis=1)
         if normalize_features:
             x_np = _zscore(x_np)
 
@@ -120,6 +158,14 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
             dst_idx = wdf["target"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
             edge_index = torch.tensor(np.vstack([src_idx, dst_idx]), dtype=torch.long)
             edge_attr = torch.tensor(wdf[["amount", "timestamp"]].to_numpy(dtype=np.float32), dtype=torch.float)
+
+        # Ingest current edges into historical neighbor sets for next snapshot.
+        if not current_df.empty:
+            src_idx_cur = current_df["source"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
+            dst_idx_cur = current_df["target"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
+            for s_i, d_i in zip(src_idx_cur, dst_idx_cur):
+                historical_neighbors[s_i].add(int(d_i))
+                historical_neighbors[d_i].add(int(s_i))
 
         y = torch.tensor(y_global, dtype=torch.float)
         labeled_mask = (y >= 0)
