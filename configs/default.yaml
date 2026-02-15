@@ -1,0 +1,33 @@
+project:
+  seed: 42
+  device: cuda
+
+paths:
+  raw_dir: data/raw
+  processed_csv: data/processed/clean_transactions.csv
+  dynamic_dir: data/dynamic_graphs
+  checkpoints_dir: outputs/checkpoints
+  metrics_dir: outputs/metrics
+  plots_dir: outputs/plots
+
+data:
+  dataset_type: elliptic
+  timestamp_unit: int
+  remove_isolated_nodes: false
+  window_size: 1
+  normalize_features: true
+
+training:
+  epochs: 100
+  lr: 0.005
+  weight_decay: 0.0005
+  dropout: 0.5
+  hidden_dim: 64
+  truncate_bptt: 4
+  train_ratio: 0.7
+  val_ratio: 0.15
+
+attack:
+  attack_budget_per_window: 1
+  attack_duration: 10
+  stealth_similarity_threshold: 0.8
