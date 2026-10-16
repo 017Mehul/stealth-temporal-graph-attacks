@@ -81,6 +81,8 @@ def test_attack_smoke_test_after_dynamic_training(tmp_path):
     cfg_path, root = _write_tiny_training_fixture(tmp_path / "attack")
     train_dynamic(str(cfg_path))
     cfg = load_config(str(cfg_path))
+    dynamic_results = json.loads((root / "metrics" / "dynamic_results.json").read_text())
+    cfg.setdefault("attack", {})["decision_threshold"] = dynamic_results["selected_threshold"]
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
     model = DynamicGCNGRU(
         snapshots[0].x.size(1),
