@@ -217,21 +217,51 @@ def run_low_rate_attack(model, snapshots, cfg, device):
     clean_probs = _predict_indices(model, clean_snapshots, test_idx, device)
     first_test = clean_snapshots[test_idx[0]]
     y0 = first_test.y.cpu().numpy().astype(int)
-    fraud_candidates = np.where((y0 == 1) & (first_test.active_mask.cpu().numpy()))[0]
-    if not len(fraud_candidates):
-        raise RuntimeError("No active labeled illicit nodes in the first test snapshot.")
+    active_first = getattr(
+        first_test, "active_mask", torch.ones_like(first_test.y, dtype=torch.bool)
+    ).cpu().numpy()
+    active_candidates = np.flatnonzero(active_first)
+    if not len(active_candidates):
+        raise RuntimeError("No active nodes in the first test snapshot.")
 
-    # Explicit oracle benchmark: target selection uses first-test labels. This must
-    # not be presented as deployable attacker knowledge.
-    target_node = int(fraud_candidates[np.argmax(clean_probs[0, fraud_candidates])])
+    target_selection_mode = str(
+        attack_cfg.get("target_selection", "model_only_highest_probability")
+    )
+    if target_selection_mode == "model_only_highest_probability":
+        # Select using model scores and activity only. Ground-truth labels are
+        # consulted below only for post-hoc reporting, never for selection.
+        target_node = int(active_candidates[np.argmax(clean_probs[0, active_candidates])])
+    elif target_selection_mode == "oracle_highest_score_illicit":
+        oracle_candidates = np.flatnonzero((y0 == 1) & active_first)
+        if not len(oracle_candidates):
+            raise RuntimeError("Oracle target selection requested but no active labeled illicit nodes exist.")
+        target_node = int(oracle_candidates[np.argmax(clean_probs[0, oracle_candidates])])
+    else:
+        raise ValueError(
+            "attack.target_selection must be 'model_only_highest_probability' "
+            "or 'oracle_highest_score_illicit'"
+        )
 
     train_idx, _, _ = split_indices(
         len(snapshots), cfg["training"]["train_ratio"], cfg["training"]["val_ratio"]
     )
-    training_degrees = np.concatenate([_degree_vector(clean_snapshots[i]) for i in train_idx])
-    source_degree_limit = float(np.percentile(
-        training_degrees, float(attack_cfg.get("source_degree_percentile", 95.0))
-    ))
+    active_training_degrees = [
+        _degree_vector(clean_snapshots[i])[
+            getattr(
+                clean_snapshots[i], "active_mask",
+                torch.ones(clean_snapshots[i].x.size(0), dtype=torch.bool),
+            ).cpu().numpy()
+        ]
+        for i in train_idx
+    ]
+    active_training_degrees = [values for values in active_training_degrees if values.size]
+    if not active_training_degrees:
+        raise RuntimeError("No active training nodes available for source degree calibration.")
+    training_degrees = np.concatenate(active_training_degrees)
+    source_degree_percentile = float(attack_cfg.get("source_degree_percentile", 95.0))
+    if not 0.0 <= source_degree_percentile <= 100.0:
+        raise ValueError("attack.source_degree_percentile must be between 0 and 100")
+    source_degree_limit = float(np.percentile(training_degrees, source_degree_percentile))
     attack_duration = min(int(attack_cfg["attack_duration"]), len(test_idx))
     budget = int(attack_cfg["attack_budget_per_window"])
     max_degree_increase = int(attack_cfg.get("max_degree_increase_per_node", 3))
@@ -316,6 +346,9 @@ def run_low_rate_attack(model, snapshots, cfg, device):
     attacked_per_snapshot = evaluate_per_snapshot(model, attacked, test_idx, device, threshold=decision_threshold)
     return {
         "target_node_index": int(target_node),
+        "target_label_posthoc": int(y0[target_node]) if y0[target_node] in (0, 1) else None,
+        "target_predicted_positive_before_attack": bool(clean_probs[0, target_node] >= decision_threshold),
+        "target_selection_mode": target_selection_mode,
         "clean_metrics": clean_metrics,
         "attacked_metrics": attacked_metrics,
         "clean_per_snapshot_metrics": clean_per_snapshot,
@@ -327,7 +360,7 @@ def run_low_rate_attack(model, snapshots, cfg, device):
         "fraud_probability_over_time": fraud_prob_over_time,
         "test_indices": test_idx,
         "seed": int(cfg["project"]["seed"]),
-        "attacker_knowledge": "oracle target-label selection on the first test snapshot; source selection uses model scores and structural constraints",
+        "attacker_knowledge": ("test labels used only for post-hoc target reporting; target selected by model score and activity" if target_selection_mode == "model_only_highest_probability" else "oracle target-label selection on the first test snapshot; source selection uses model scores and structural constraints"),
         "amount_policy": amount_policy,
         "stealth_constraints_enforced": bool(accepted_constraints),
         "stealth_constraints": {
