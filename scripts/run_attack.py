@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -11,7 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from slrta.attack.low_rate import run_low_rate_attack, save_attack_plots
 from slrta.config import ensure_dirs, load_config
 from slrta.data.io import load_snapshots, require_first_seen_masks
-from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
+from slrta.models.dynamic_gcn_gru import MODEL_VERSION, DynamicGCNGRU
 
 
 if __name__ == "__main__":
@@ -36,14 +37,27 @@ if __name__ == "__main__":
     if not ckpt.exists():
         raise FileNotFoundError(f"Missing checkpoint {ckpt}. Run scripts/train_dynamic.py first.")
 
-    model.load_state_dict(torch.load(ckpt, map_location=device))
-
     threshold_path = Path(cfg["paths"]["metrics_dir"]) / "dynamic_results.json"
-    if threshold_path.exists():
-        threshold_results = json.loads(threshold_path.read_text(encoding="utf-8"))
-        cfg.setdefault("attack", {})["decision_threshold"] = float(
-            threshold_results.get("selected_threshold", 0.5)
+    if not threshold_path.exists():
+        raise FileNotFoundError(
+            f"Missing {threshold_path}. Run scripts/train_dynamic.py before attack evaluation."
         )
+    threshold_results = json.loads(threshold_path.read_text(encoding="utf-8"))
+    if threshold_results.get("model_version") != MODEL_VERSION:
+        raise RuntimeError(
+            "Dynamic model results were produced by a different architecture version. "
+            "Retrain the temporal model before running the attack."
+        )
+    actual_hash = hashlib.sha256(ckpt.read_bytes()).hexdigest()
+    if threshold_results.get("checkpoint_sha256") != actual_hash:
+        raise RuntimeError(
+            "The temporal checkpoint does not match dynamic_results.json. "
+            "Retrain the model or restore the matching checkpoint/metrics pair."
+        )
+    cfg.setdefault("attack", {})["decision_threshold"] = float(
+        threshold_results["selected_threshold"]
+    )
+    model.load_state_dict(torch.load(ckpt, map_location=device, weights_only=True))
 
     result = run_low_rate_attack(model, snapshots, cfg, device)
     save_attack_plots(result, cfg["paths"]["plots_dir"])
