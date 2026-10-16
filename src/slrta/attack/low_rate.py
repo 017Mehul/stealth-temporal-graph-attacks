@@ -132,6 +132,7 @@ def _candidate_passes_constraints(
         return False, 0.0, "duplicate_edge"
 
     max_observed_js = 0.0
+    exceeds_limit = False
     for idx in range(start_index, len(attacked_snapshots)):
         snap = attacked_snapshots[idx]
         active = getattr(snap, "active_mask", None)
@@ -148,8 +149,9 @@ def _candidate_passes_constraints(
         }
         divergence = max(divergences.values())
         max_observed_js = max(max_observed_js, divergence)
-        if divergence > max_js_divergence:
-            return False, max_observed_js, "degree_distribution_js"
+        exceeds_limit = exceeds_limit or divergence > max_js_divergence
+    if exceeds_limit:
+        return False, max_observed_js, "degree_distribution_js"
     return True, max_observed_js, "accepted"
 
 
