@@ -9,7 +9,7 @@ from slrta.attack.low_rate import (
     _recompute_cumulative_features,
 )
 from slrta.data.clean import load_elliptic
-from slrta.data.io import load_snapshots
+from slrta.data.io import load_snapshots, require_first_seen_masks
 from slrta.data.snapshots import Data, build_dynamic_snapshots
 from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
 
@@ -173,3 +173,12 @@ def test_attack_constraints_reject_degree_distribution_shift():
     assert accepted is False
     assert divergence > 0.0
     assert reason == "degree_distribution_js"
+
+
+def test_elliptic_training_rejects_legacy_snapshots_without_first_seen_masks():
+    legacy = [Data(x=torch.zeros((1, 11)), y=torch.tensor([0.0]))]
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="new_node_mask"):
+        require_first_seen_masks(legacy, "elliptic")
