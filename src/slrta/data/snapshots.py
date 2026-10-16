@@ -156,7 +156,6 @@ def build_dynamic_snapshots(
     # 3) historical neighbor illicit ratio
     cumulative_tx_count = np.zeros((len(nodes),), dtype=np.float32)
     prev_degree = np.zeros((len(nodes),), dtype=np.float32)
-    historical_neighbors = [set() for _ in range(len(nodes))]
     # Ground-truth labels are supervision only, never model input features.
 
     if not 0.0 < train_ratio < 1.0:
@@ -192,9 +191,8 @@ def build_dynamic_snapshots(
 
         temporal_feats = np.column_stack([cumulative_tx_count, degree_growth, hist_illicit_ratio]).astype(np.float32)
         x_np = np.concatenate([base_feats, temporal_feats], axis=1)
-        # Do not fit a separate scaler per snapshot: that makes feature scales
-        # incomparable and lets the full node universe affect each snapshot.
-        # A training-only scaler can be added as a separate fitted transform.
+        # Scaling is deferred until all raw snapshots are built so a single
+        # transform can be fitted on the chronological training prefix only.
 
         if wdf.empty:
             edge_index = torch.empty((2, 0), dtype=torch.long)
@@ -204,14 +202,6 @@ def build_dynamic_snapshots(
             dst_idx = wdf["target"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
             edge_index = torch.tensor(np.vstack([src_idx, dst_idx]), dtype=torch.long)
             edge_attr = torch.tensor(wdf[["amount", "timestamp"]].to_numpy(dtype=np.float32), dtype=torch.float)
-
-        # Ingest current edges into historical neighbor sets for next snapshot.
-        if not current_df.empty:
-            src_idx_cur = current_df["source"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
-            dst_idx_cur = current_df["target"].astype(str).map(node_to_idx).to_numpy(dtype=np.int64)
-            for s_i, d_i in zip(src_idx_cur, dst_idx_cur):
-                historical_neighbors[s_i].add(int(d_i))
-                historical_neighbors[d_i].add(int(s_i))
 
         visible = first_seen_arr <= cutoff
         y_snapshot = y_global.copy()
