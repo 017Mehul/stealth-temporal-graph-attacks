@@ -1,6 +1,6 @@
 project:
   seed: 42
-  device: cuda
+  device: cpu
 
 paths:
   raw_dir: data/raw
