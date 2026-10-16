@@ -60,10 +60,13 @@ def load_elliptic(raw_dir: str) -> pd.DataFrame:
     # Keep the legacy label column for generic consumers; snapshot construction
     # uses source_label/target_label to build a unique node label map.
     edges["label"] = edges["source_label"]
-    edges["timestamp"] = edges["source"].map(times).fillna(0).astype(int)
+    edges["source_timestamp"] = edges["source"].map(times).fillna(0).astype(int)
+    edges["target_timestamp"] = edges["target"].map(times).fillna(0).astype(int)
+    # Make an edge visible only once both endpoint transactions have been observed.
+    edges["timestamp"] = edges[["source_timestamp", "target_timestamp"]].max(axis=1).astype(int)
     # Elliptic does not provide transaction amounts; use a documented placeholder.
     edges["amount"] = 1.0
-    return edges[["source", "target", "amount", "timestamp", "label", "source_label", "target_label"]]
+    return edges[["source", "target", "amount", "timestamp", "source_timestamp", "target_timestamp", "label", "source_label", "target_label"]]
 
 
 def load_generic_transactions(raw_dir: str) -> pd.DataFrame:
