@@ -12,13 +12,13 @@ except ImportError:
         return it
 
 from slrta.config import ensure_dirs, load_config, set_seed
-from slrta.data.io import load_snapshots, split_indices
+from slrta.data.io import labeled_node_mask, load_snapshots, split_indices
 from slrta.eval.metrics import compute_binary_metrics
 from slrta.eval.thresholds import select_f1_threshold
 from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
 
 
-def eval_dynamic(model, snapshots, indices, device, threshold=0.5):
+def eval_dynamic(model, snapshots, indices, device, threshold=0.5, newly_observed_only=True):
     """Evaluate requested time steps after warming hidden state on earlier snapshots."""
     if not indices:
         raise ValueError("Evaluation split is empty")
@@ -31,7 +31,7 @@ def eval_dynamic(model, snapshots, indices, device, threshold=0.5):
         probs_tn = torch.sigmoid(logits_tn)
         for idx in indices:
             data = snapshots[idx]
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
             if mask.sum() == 0:
                 continue
             y_true_all.append(data.y[mask].cpu().numpy().astype(int))
@@ -43,7 +43,7 @@ def eval_dynamic(model, snapshots, indices, device, threshold=0.5):
 
 
 
-def collect_dynamic_probs_and_labels(model, snapshots, indices, device):
+def collect_dynamic_probs_and_labels(model, snapshots, indices, device, newly_observed_only=True):
     """Collect pooled predictions while preserving chronological hidden-state history."""
     if not indices:
         raise ValueError("Evaluation split is empty")
@@ -54,7 +54,7 @@ def collect_dynamic_probs_and_labels(model, snapshots, indices, device):
         y_true_all, y_prob_all = [], []
         for idx in indices:
             data = snapshots[idx]
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
             if mask.sum() == 0:
                 continue
             y_true_all.append(data.y[mask].cpu().numpy().astype(int))
@@ -65,7 +65,7 @@ def collect_dynamic_probs_and_labels(model, snapshots, indices, device):
 
 
 
-def eval_dynamic_per_snapshot(model, snapshots, indices, device, threshold):
+def eval_dynamic_per_snapshot(model, snapshots, indices, device, threshold, newly_observed_only=True):
     """Report metrics per snapshot after warming recurrent state chronologically."""
     if not indices:
         raise ValueError("Evaluation split is empty")
@@ -76,7 +76,7 @@ def eval_dynamic_per_snapshot(model, snapshots, indices, device, threshold):
         probs_tn = torch.sigmoid(model.forward_embeddings(seq))
         for idx in indices:
             data = snapshots[idx]
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
             y_true = data.y[mask].cpu().numpy().astype(int)
             y_prob = probs_tn[idx][mask.to(device)].cpu().numpy()
             metrics = compute_binary_metrics(y_true, y_prob, threshold=threshold)
@@ -85,11 +85,11 @@ def eval_dynamic_per_snapshot(model, snapshots, indices, device, threshold):
     return results
 
 
-def class_distribution(snapshots, indices):
+def class_distribution(snapshots, indices, newly_observed_only=True):
     labels = []
     for idx in indices:
         data = snapshots[idx]
-        mask = data.labeled_mask & (data.y >= 0)
+        mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
         if mask.any():
             labels.append(data.y[mask].cpu().numpy().astype(int))
     values = np.concatenate(labels) if labels else np.array([], dtype=int)
@@ -119,7 +119,7 @@ def main(config_path: str):
     ys = []
     for i in train_idx:
         data = snapshots[i]
-        mask = data.labeled_mask & (data.y >= 0)
+        mask = labeled_node_mask(data)
         if mask.any():
             ys.append(data.y[mask].cpu().numpy().astype(int))
     labels = np.concatenate(ys) if ys else np.array([], dtype=int)
@@ -146,7 +146,7 @@ def main(config_path: str):
         chunk_losses, update_steps, epoch_loss_sum = [], 0, 0.0
         for local_t, data in enumerate(train_seq):
             logits_t, h = model.forward_step(data, h)
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data)
             if mask.any():
                 chunk_losses.append(criterion(logits_t[mask], data.y[mask]))
             should_update = ((local_t + 1) % truncate_bptt == 0) or (local_t + 1 == len(train_seq))
@@ -188,6 +188,10 @@ def main(config_path: str):
     selected_threshold = select_f1_threshold(y_val_true, y_val_prob)
     val_metrics = eval_dynamic(model, snapshots, val_idx, device, threshold=selected_threshold)
     test_metrics = eval_dynamic(model, snapshots, test_idx, device, threshold=selected_threshold)
+    all_active_test_metrics = eval_dynamic(
+        model, snapshots, test_idx, device,
+        threshold=selected_threshold, newly_observed_only=False,
+    )
     if test_metrics["n_samples"] == 0:
         raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
     print(f"Validation-selected threshold: {selected_threshold:.6f}")
@@ -204,13 +208,16 @@ def main(config_path: str):
             "num_snapshots": len(snapshots),
         },
         "checkpoint_selection": "maximum validation PR-AUC; falls back to validation F1 if PR-AUC is undefined",
+        "evaluation_cohort": "newly observed labeled nodes only; nodes are supervised/evaluated once at first appearance",
         "test_per_snapshot_metrics": test_per_snapshot,
+        "all_active_test_metrics_secondary": all_active_test_metrics,
         "selected_threshold": selected_threshold,
         "threshold_selection": "maximum validation F1; threshold frozen before test evaluation",
         "class_distribution": {
             "train": {"negative": int((labels == 0).sum()), "positive": int((labels == 1).sum())},
             "validation": {"negative": int((y_val_true == 0).sum()), "positive": int((y_val_true == 1).sum())},
             "test": class_distribution(snapshots, test_idx),
+            "test_all_active_secondary": class_distribution(snapshots, test_idx, newly_observed_only=False),
         },
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
         "val_metrics": val_metrics, "test_metrics": test_metrics,
