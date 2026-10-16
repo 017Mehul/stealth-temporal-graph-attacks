@@ -142,8 +142,13 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
         wdf = clean_df[clean_df["timestamp"] <= cutoff].copy()
         current_df = clean_df[clean_df["timestamp"].isin(ts_window)].copy()
 
-        # For cumulative snapshots, window_size is the number of original timestamps in the window
-        base_feats, current_degree = compute_node_features(wdf, node_to_idx, window_size=len(ts_window))
+        # Cumulative edge counts must be normalized by elapsed timestamps, not just
+        # the width of the latest window. Otherwise frequency grows spuriously with
+        # history length (especially when window_size=1).
+        elapsed_steps = int(wdf["timestamp"].nunique()) if not wdf.empty else 1
+        base_feats, current_degree = compute_node_features(
+            wdf, node_to_idx, window_size=max(1, elapsed_steps)
+        )
 
         # Disable the former illicit-neighbor ratio: it used ground-truth labels
         # from the full dataset and leaked targets into model features.
