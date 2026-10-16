@@ -198,7 +198,7 @@ def main(config_path: str):
             best_val_score = checkpoint_score
             torch.save(model.state_dict(), best_path)
 
-    model.load_state_dict(torch.load(best_path, map_location=device))
+    model.load_state_dict(torch.load(best_path, map_location=device, weights_only=True))
     # Calibrate on validation predictions only, then freeze the threshold for test.
     y_val_true, y_val_prob = collect_probs_and_labels(model, snapshots, val_idx, device)
     if y_val_prob.size == 0:
