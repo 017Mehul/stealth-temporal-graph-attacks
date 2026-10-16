@@ -206,9 +206,12 @@ def run_low_rate_attack(model, snapshots, cfg, device):
     )
     if not test_idx:
         raise ValueError("No test snapshots available")
+    decision_threshold = float(attack_cfg.get("decision_threshold", 0.5))
+    if not 0.0 <= decision_threshold <= 1.0:
+        raise ValueError("attack.decision_threshold must be between 0 and 1")
     clean_snapshots = [copy.deepcopy(s) for s in snapshots]
-    clean_metrics = evaluate_sequence_f1(model, clean_snapshots, test_idx, device)
-    clean_per_snapshot = evaluate_per_snapshot(model, clean_snapshots, test_idx, device)
+    clean_metrics = evaluate_sequence_f1(model, clean_snapshots, test_idx, device, threshold=decision_threshold)
+    clean_per_snapshot = evaluate_per_snapshot(model, clean_snapshots, test_idx, device, threshold=decision_threshold)
     attacked = [copy.deepcopy(s) for s in clean_snapshots]
 
     clean_probs = _predict_indices(model, clean_snapshots, test_idx, device)
@@ -305,17 +308,18 @@ def run_low_rate_attack(model, snapshots, cfg, device):
         current_prob = _predict_indices(model, attacked, [snap_idx], device)[0]
         p_target = float(current_prob[target_node])
         fraud_prob_over_time.append(p_target)
-        successful_steps += int(p_target < 0.5)
+        successful_steps += int(p_target < decision_threshold)
 
-    attacked_metrics = evaluate_sequence_f1(model, attacked, test_idx, device)
-    attacked_per_snapshot = evaluate_per_snapshot(model, attacked, test_idx, device)
+    attacked_metrics = evaluate_sequence_f1(model, attacked, test_idx, device, threshold=decision_threshold)
+    attacked_per_snapshot = evaluate_per_snapshot(model, attacked, test_idx, device, threshold=decision_threshold)
     return {
         "target_node_index": int(target_node),
         "clean_metrics": clean_metrics,
         "attacked_metrics": attacked_metrics,
         "clean_per_snapshot_metrics": clean_per_snapshot,
         "attacked_per_snapshot_metrics": attacked_per_snapshot,
-        "attack_success": bool(fraud_prob_over_time and fraud_prob_over_time[-1] < 0.5),
+        "attack_success": bool(fraud_prob_over_time and fraud_prob_over_time[-1] < decision_threshold),
+        "decision_threshold": decision_threshold,
         "attack_success_rate_over_steps": float(successful_steps / max(1, len(fraud_prob_over_time))),
         "injected_edges": int(injected_edges),
         "fraud_probability_over_time": fraud_prob_over_time,
