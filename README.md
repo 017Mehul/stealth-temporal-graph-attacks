@@ -57,7 +57,7 @@ python scripts/run_attack.py --config configs/default.yaml
 python scripts/run_multiseed.py --config configs/default.yaml --seeds 42,43,44
 ```
 
-The dataset must be present locally before the pipeline can run. Training and attack scripts expect graph snapshots under `data/dynamic_graphs/`; checkpoints, metrics, and plots are written under `outputs/`.
+The dataset must be present locally before the pipeline can run. After pulling changes to the first-seen evaluation protocol, rerun `python scripts/run_week1.py --config configs/default.yaml` to regenerate snapshots with `new_node_mask`; training and attack scripts intentionally reject legacy Elliptic snapshots without this mask. Checkpoints, metrics, and plots are written under `outputs/`.
 
 ## Tests
 
