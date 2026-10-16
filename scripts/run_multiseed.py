@@ -1,5 +1,5 @@
 import argparse
-import copy
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from slrta.attack.low_rate import run_low_rate_attack, save_attack_plots
 from slrta.config import load_config
 from slrta.data.io import load_snapshots
-from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
+from slrta.models.dynamic_gcn_gru import MODEL_VERSION, DynamicGCNGRU
 from slrta.train_baseline import main as train_baseline
 from slrta.train_dynamic import main as train_dynamic
 
@@ -56,6 +56,10 @@ def run_seed(base_config_path, seed, root_out):
         cfg["training"]["dropout"],
     ).to(torch.device(cfg["project"].get("device", "cpu")))
     checkpoint = Path(cfg["paths"]["checkpoints_dir"]) / "dynamic_gcn_gru_best.pt"
+    if dynamic_results.get("model_version") != MODEL_VERSION:
+        raise RuntimeError(f"Unexpected model version in {metrics_dir / 'dynamic_results.json'}")
+    if dynamic_results.get("checkpoint_sha256") != hashlib.sha256(checkpoint.read_bytes()).hexdigest():
+        raise RuntimeError("Temporal checkpoint hash does not match its metrics record")
     model.load_state_dict(torch.load(checkpoint, map_location=cfg["project"].get("device", "cpu"), weights_only=True))
     result = run_low_rate_attack(model, snapshots, cfg, torch.device(cfg["project"].get("device", "cpu")))
     metrics_dir = Path(cfg["paths"]["metrics_dir"])
