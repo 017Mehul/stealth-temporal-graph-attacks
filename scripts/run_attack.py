@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from slrta.attack.low_rate import run_low_rate_attack, save_attack_plots
 from slrta.config import ensure_dirs, load_config
-from slrta.data.io import load_snapshots
+from slrta.data.io import load_snapshots, require_first_seen_masks
 from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
 
 
@@ -27,6 +27,7 @@ if __name__ == "__main__":
         raise RuntimeError("CUDA was requested in config but is unavailable; set project.device: cpu")
     device = torch.device(requested_device)
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
+    require_first_seen_masks(snapshots, cfg.get("data", {}).get("dataset_type", "generic"))
 
     in_dim = snapshots[0].x.size(1)
     model = DynamicGCNGRU(in_dim, cfg["training"]["hidden_dim"], cfg["training"]["dropout"]).to(device)
