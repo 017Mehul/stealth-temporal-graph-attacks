@@ -58,6 +58,8 @@ def test_cumulative_snapshot_frequency_uses_elapsed_timestamps(tmp_path):
     assert snapshots[0].feature_mean[2].item() == 1.0
     assert snapshots[0].active_mask.tolist() == [True, True, False]
     assert snapshots[1].active_mask.tolist() == [True, True, True]
+    assert snapshots[0].new_node_mask.tolist() == [True, True, False]
+    assert snapshots[1].new_node_mask.tolist() == [False, False, True]
 
 
 def test_injected_edge_persists_from_intervention_time_forward():
