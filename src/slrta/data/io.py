@@ -38,3 +38,16 @@ def labeled_node_mask(data, newly_observed_only=True):
         mask = mask & data.new_node_mask.bool()
     return mask
 
+
+def require_first_seen_masks(snapshots, dataset_type):
+    """Prevent silently using legacy snapshots for a first-seen temporal protocol."""
+    if str(dataset_type).lower() == "elliptic":
+        missing = [idx for idx, snapshot in enumerate(snapshots) if not hasattr(snapshot, "new_node_mask")]
+        if missing:
+            preview = ", ".join(str(idx) for idx in missing[:5])
+            raise RuntimeError(
+                "Elliptic snapshots lack new_node_mask and were built by an older preprocessing version. "
+                "Run python scripts/run_week1.py --config configs/default.yaml before training/evaluation. "
+                f"Missing mask in snapshot indices: {preview}"
+            )
+
