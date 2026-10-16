@@ -127,10 +127,18 @@ def build_dynamic_snapshots(
     # appears in the observed edge stream. Earlier snapshots must not supervise
     # a node that has not appeared yet.
     first_seen = {}
-    for _, row in clean_df[["source", "target", "timestamp"]].iterrows():
-        ts = int(row["timestamp"])
-        for node in (str(row["source"]), str(row["target"])):
-            first_seen[node] = min(first_seen.get(node, ts), ts)
+    if {"source_timestamp", "target_timestamp"}.issubset(clean_df.columns):
+        for _, row in clean_df[["source", "target", "source_timestamp", "target_timestamp"]].iterrows():
+            for node, ts_value in (
+                (str(row["source"]), int(row["source_timestamp"])),
+                (str(row["target"]), int(row["target_timestamp"])),
+            ):
+                first_seen[node] = min(first_seen.get(node, ts_value), ts_value)
+    else:
+        for _, row in clean_df[["source", "target", "timestamp"]].iterrows():
+            ts = int(row["timestamp"])
+            for node in (str(row["source"]), str(row["target"])):
+                first_seen[node] = min(first_seen.get(node, ts), ts)
     first_seen_arr = np.full((len(nodes),), np.iinfo(np.int64).max, dtype=np.int64)
     for node, ts in first_seen.items():
         first_seen_arr[node_to_idx[node]] = ts
