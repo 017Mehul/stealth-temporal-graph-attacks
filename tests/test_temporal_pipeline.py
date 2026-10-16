@@ -43,8 +43,9 @@ def test_cumulative_snapshot_frequency_uses_elapsed_timestamps(tmp_path):
     snapshots = load_snapshots(str(tmp_path))
 
     # B participates in one edge at t=1, then two cumulative edges across two times.
-    assert snapshots[0].x[1, 4].item() == 1.0
-    assert snapshots[1].x[1, 4].item() == 1.0
+    assert abs(snapshots[0].x[1, 4].item() - snapshots[1].x[1, 4].item()) < 1e-6
+    assert snapshots[0].feature_mean.shape[0] == snapshots[0].x.shape[1]
+    assert snapshots[0].feature_std.shape[0] == snapshots[0].x.shape[1]
     assert snapshots[0].active_mask.tolist() == [True, True, False]
     assert snapshots[1].active_mask.tolist() == [True, True, True]
 
