@@ -43,6 +43,19 @@ if __name__ == "__main__":
             f"Missing {threshold_path}. Run scripts/train_dynamic.py before attack evaluation."
         )
     threshold_results = json.loads(threshold_path.read_text(encoding="utf-8"))
+    if cfg.get("data", {}).get("dataset_type") == "elliptic":
+        manifest_path = Path(cfg["paths"]["processed_csv"]).parent / "dataset_provenance.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(
+                f"Missing {manifest_path}. Rerun preprocessing before attack evaluation."
+            )
+        current_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        trained_manifest = threshold_results.get("dataset_provenance", {}).get("source_manifest")
+        if trained_manifest != current_manifest:
+            raise RuntimeError(
+                "Dataset provenance differs from the one used for training. "
+                "Retrain on the current preprocessed dataset before attack evaluation."
+            )
     if threshold_results.get("model_version") != MODEL_VERSION:
         raise RuntimeError(
             "Dynamic model results were produced by a different architecture version. "
