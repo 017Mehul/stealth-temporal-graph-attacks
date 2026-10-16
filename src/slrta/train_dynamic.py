@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 from pathlib import Path
 
@@ -13,10 +14,11 @@ except ImportError:
 from slrta.config import ensure_dirs, load_config, set_seed
 from slrta.data.io import load_snapshots, split_indices
 from slrta.eval.metrics import compute_binary_metrics
+from slrta.eval.thresholds import select_f1_threshold
 from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
 
 
-def eval_dynamic(model, snapshots, indices, device):
+def eval_dynamic(model, snapshots, indices, device, threshold=0.5):
     """Evaluate requested time steps after warming hidden state on earlier snapshots."""
     if not indices:
         raise ValueError("Evaluation split is empty")
@@ -24,7 +26,7 @@ def eval_dynamic(model, snapshots, indices, device):
     y_true_all, y_prob_all = [], []
     with torch.no_grad():
         last_index = max(indices)
-        seq = [snapshots[i].to(device) for i in range(last_index + 1)]
+        seq = [copy.deepcopy(snapshots[i]).to(device) for i in range(last_index + 1)]
         logits_tn = model.forward_embeddings(seq)
         probs_tn = torch.sigmoid(logits_tn)
         for idx in indices:
@@ -36,8 +38,30 @@ def eval_dynamic(model, snapshots, indices, device):
             y_prob_all.append(probs_tn[idx][mask.to(device)].cpu().numpy())
 
     if not y_true_all:
-        return compute_binary_metrics([], [])
-    return compute_binary_metrics(np.concatenate(y_true_all), np.concatenate(y_prob_all))
+        return compute_binary_metrics([], [], threshold=threshold)
+    return compute_binary_metrics(np.concatenate(y_true_all), np.concatenate(y_prob_all), threshold=threshold)
+
+
+
+def collect_dynamic_probs_and_labels(model, snapshots, indices, device):
+    """Collect pooled predictions while preserving chronological hidden-state history."""
+    if not indices:
+        raise ValueError("Evaluation split is empty")
+    model.eval()
+    with torch.no_grad():
+        seq = [copy.deepcopy(snapshots[i]).to(device) for i in range(max(indices) + 1)]
+        probs_tn = torch.sigmoid(model.forward_embeddings(seq))
+        y_true_all, y_prob_all = [], []
+        for idx in indices:
+            data = snapshots[idx]
+            mask = data.labeled_mask & (data.y >= 0)
+            if mask.sum() == 0:
+                continue
+            y_true_all.append(data.y[mask].cpu().numpy().astype(int))
+            y_prob_all.append(probs_tn[idx][mask.to(device)].cpu().numpy())
+    if not y_true_all:
+        return np.array([], dtype=int), np.array([], dtype=float)
+    return np.concatenate(y_true_all), np.concatenate(y_prob_all)
 
 
 def main(config_path: str):
@@ -119,12 +143,24 @@ def main(config_path: str):
     if not best_path.exists():
         raise RuntimeError("No checkpoint was selected; validation produced no usable model.")
     model.load_state_dict(torch.load(best_path, map_location=device, weights_only=True))
-    val_metrics = eval_dynamic(model, snapshots, val_idx, device)
-    test_metrics = eval_dynamic(model, snapshots, test_idx, device)
+    # Select a threshold using validation predictions only, then freeze it for test.
+    y_val_true, y_val_prob = collect_dynamic_probs_and_labels(model, snapshots, val_idx, device)
+    if y_val_prob.size == 0:
+        raise RuntimeError("No labeled validation samples; cannot calibrate a threshold.")
+    selected_threshold = select_f1_threshold(y_val_true, y_val_prob)
+    val_metrics = eval_dynamic(model, snapshots, val_idx, device, threshold=selected_threshold)
+    test_metrics = eval_dynamic(model, snapshots, test_idx, device, threshold=selected_threshold)
     if test_metrics["n_samples"] == 0:
         raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
+    print(f"Validation-selected threshold: {selected_threshold:.6f}")
     out = {
         "model": "DynamicGCNGRU",
+        "selected_threshold": selected_threshold,
+        "threshold_selection": "maximum validation F1; threshold frozen before test evaluation",
+        "class_distribution": {
+            "train": {"negative": int((labels == 0).sum()), "positive": int((labels == 1).sum())},
+            "validation": {"negative": int((y_val_true == 0).sum()), "positive": int((y_val_true == 1).sum())},
+        },
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
         "val_metrics": val_metrics, "test_metrics": test_metrics,
         "best_checkpoint": str(best_path), "train_loss_curve": train_losses,
