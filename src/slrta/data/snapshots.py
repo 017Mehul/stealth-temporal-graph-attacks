@@ -83,8 +83,20 @@ def build_dynamic_snapshots(
     clean_df: pd.DataFrame, out_dir: str, window_size: int = 1,
     normalize_features: bool = True, train_ratio: float = 0.7,
 ) -> None:
+    if window_size < 1:
+        raise ValueError("window_size must be at least 1")
+    if clean_df.empty:
+        raise ValueError("Cannot build snapshots from an empty transaction dataframe")
+    required_columns = {"source", "target", "amount", "timestamp", "label"}
+    missing = required_columns.difference(clean_df.columns)
+    if missing:
+        raise ValueError(f"Missing required transaction columns: {sorted(missing)}")
+
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
+    # Remove stale generated snapshots so reruns cannot silently mix datasets.
+    for stale_snapshot in out_path.glob("graph_*.pt"):
+        stale_snapshot.unlink()
 
     nodes = pd.Index(pd.concat([clean_df["source"], clean_df["target"]], ignore_index=True).astype(str).unique())
     node_to_idx = {node: i for i, node in enumerate(nodes)}
