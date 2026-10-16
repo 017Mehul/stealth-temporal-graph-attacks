@@ -13,10 +13,11 @@ except ImportError:
 from slrta.config import ensure_dirs, load_config, set_seed
 from slrta.data.io import load_snapshots, split_indices
 from slrta.eval.metrics import compute_binary_metrics
+from slrta.eval.thresholds import select_f1_threshold
 from slrta.models.static_gcn import StaticGCN
 
 
-def evaluate(model, snapshots, indices, device):
+def evaluate(model, snapshots, indices, device, threshold=0.5):
     model.eval()
     y_true_all, y_prob_all = [], []
     with torch.no_grad():
@@ -31,11 +32,11 @@ def evaluate(model, snapshots, indices, device):
             y_prob_all.append(probs[mask].cpu().numpy())
 
     if not y_true_all:
-        return compute_binary_metrics([], [])
+        return compute_binary_metrics([], [], threshold=threshold)
 
     y_true = np.concatenate(y_true_all)
     y_prob = np.concatenate(y_prob_all)
-    return compute_binary_metrics(y_true, y_prob)
+    return compute_binary_metrics(y_true, y_prob, threshold=threshold)
 
 
 def collect_probs_and_labels(model, snapshots, indices, device):
@@ -165,29 +166,26 @@ def main(config_path: str):
             torch.save(model.state_dict(), best_path)
 
     model.load_state_dict(torch.load(best_path, map_location=device))
-    val_metrics = evaluate(model, snapshots, val_idx, device)
-    test_metrics = evaluate(model, snapshots, test_idx, device)
+    # Calibrate on validation predictions only, then freeze the threshold for test.
+    y_val_true, y_val_prob = collect_probs_and_labels(model, snapshots, val_idx, device)
+    if y_val_prob.size == 0:
+        raise RuntimeError("No labeled validation samples; cannot calibrate a threshold.")
+    selected_threshold = select_f1_threshold(y_val_true, y_val_prob)
+    val_metrics = evaluate(model, snapshots, val_idx, device, threshold=selected_threshold)
+    test_metrics = evaluate(model, snapshots, test_idx, device, threshold=selected_threshold)
     if test_metrics["n_samples"] == 0:
         raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
-
-    # Collect probs and labels for validation to inspect prediction distribution
-    y_val_true, y_val_prob = collect_probs_and_labels(model, snapshots, val_idx, device)
-    if y_val_prob.size:
-        print("Validation probs — mean:{:.6f} max:{:.6f} min:{:.6f}".format(
-            float(y_val_prob.mean()), float(y_val_prob.max()), float(y_val_prob.min())
-        ))
-        preds_05 = (y_val_prob >= 0.5).sum()
-        print("Predicted positives at 0.5:", int(preds_05))
-
-        # Test several thresholds
-        for thr in [0.5, 0.3, 0.2, 0.1, 0.05]:
-            metrics_thr = compute_binary_metrics(y_val_true, y_val_prob, threshold=thr)
-            print(f"Threshold={thr:.2f} -> f1={metrics_thr['f1']:.4f} prec={metrics_thr['precision']:.4f} rec={metrics_thr['recall']:.4f}")
-    else:
-        print("No labeled validation samples to compute probabilities.")
+    print(f"Validation-selected threshold: {selected_threshold:.6f}")
 
     out = {
         "model": "StaticGCN",
+        "seed": int(cfg["project"]["seed"]),
+        "selected_threshold": selected_threshold,
+        "threshold_selection": "maximum validation F1; threshold frozen before test evaluation",
+        "class_distribution": {
+            "train": {"negative": int((y_train == 0).sum()), "positive": int((y_train == 1).sum())},
+            "validation": {"negative": int((y_val_true == 0).sum()), "positive": int((y_val_true == 1).sum())},
+        },
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
         "val_metrics": val_metrics,
         "test_metrics": test_metrics,
