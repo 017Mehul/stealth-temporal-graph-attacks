@@ -51,7 +51,7 @@ def _write_tiny_training_fixture(root):
             "train_ratio": 0.6,
             "val_ratio": 0.2,
         },
-        "attack": {"attack_budget_per_window": 1, "attack_duration": 2},
+        "attack": {"attack_budget_per_window": 1, "attack_duration": 2, "source_degree_percentile": 100, "max_degree_increase_per_node": 10, "max_degree_distribution_js": 0.5},
     }
     cfg_path = root / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -92,6 +92,8 @@ def test_attack_smoke_test_after_dynamic_training(tmp_path):
 
     result = run_low_rate_attack(model, snapshots, cfg, torch.device("cpu"))
 
-    assert result["injected_edges"] == 2
+    assert result["injected_edges"] <= 2
     assert result["attacked_metrics"]["n_samples"] > 0
+    assert result["stealth_constraints_enforced"] is True
+    assert result["stealth_constraints"]["observed_max_degree_distribution_js"] <= 0.5
     assert len(result["fraud_probability_over_time"]) == 2
