@@ -6,6 +6,7 @@ import torch
 from slrta.attack.low_rate import (
     _append_edge_to_future_snapshots,
     _candidate_passes_constraints,
+    _degree_distribution_js,
     _recompute_cumulative_features,
 )
 from slrta.data.clean import load_elliptic
@@ -182,3 +183,28 @@ def test_elliptic_training_rejects_legacy_snapshots_without_first_seen_masks():
 
     with pytest.raises(RuntimeError, match="new_node_mask"):
         require_first_seen_masks(legacy, "elliptic")
+
+
+def test_degree_similarity_ignores_inactive_future_node_padding():
+    def snapshots_with_padding(num_nodes):
+        active = torch.zeros(num_nodes, dtype=torch.bool)
+        active[:2] = True
+        clean = Data(
+            x=torch.zeros((num_nodes, 11)),
+            edge_index=torch.empty((2, 0), dtype=torch.long),
+            active_mask=active,
+        )
+        attacked = Data(
+            x=torch.zeros((num_nodes, 11)),
+            edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+            active_mask=active.clone(),
+        )
+        return clean, attacked
+
+    clean_small, attacked_small = snapshots_with_padding(4)
+    clean_large, attacked_large = snapshots_with_padding(8)
+
+    small_divergence = _degree_distribution_js(clean_small, attacked_small, "total")
+    large_divergence = _degree_distribution_js(clean_large, attacked_large, "total")
+
+    assert abs(small_divergence - large_divergence) < 1e-12
