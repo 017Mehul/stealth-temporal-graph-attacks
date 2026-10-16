@@ -30,3 +30,6 @@ training:
 attack:
   attack_budget_per_window: 1
   attack_duration: 10
+  source_degree_percentile: 95
+  max_degree_increase_per_node: 3
+  max_degree_distribution_js: 0.05
