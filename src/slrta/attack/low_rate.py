@@ -54,7 +54,7 @@ def evaluate_per_snapshot(model, snapshots, indices, device, threshold=0.5):
     results = []
     for local_idx, snapshot_idx in enumerate(indices):
         data = snapshots[snapshot_idx]
-        mask = (data.labeled_mask & (data.y >= 0)).cpu().numpy()
+        mask = labeled_node_mask(data).cpu().numpy()
         y_true = data.y.cpu().numpy()[mask].astype(int)
         y_prob = probs[local_idx][mask]
         metrics = compute_binary_metrics(y_true, y_prob, threshold=threshold)
