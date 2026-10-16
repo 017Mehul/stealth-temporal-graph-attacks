@@ -51,7 +51,7 @@ def _write_tiny_training_fixture(root):
             "train_ratio": 0.6,
             "val_ratio": 0.2,
         },
-        "attack": {"attack_budget_per_window": 1, "attack_duration": 2},
+        "attack": {"attack_budget_per_window": 1, "attack_duration": 2, "source_degree_percentile": 100, "max_degree_increase_per_node": 10, "max_degree_distribution_js": 0.5},
     }
     cfg_path = root / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -81,6 +81,8 @@ def test_attack_smoke_test_after_dynamic_training(tmp_path):
     cfg_path, root = _write_tiny_training_fixture(tmp_path / "attack")
     train_dynamic(str(cfg_path))
     cfg = load_config(str(cfg_path))
+    dynamic_results = json.loads((root / "metrics" / "dynamic_results.json").read_text())
+    cfg.setdefault("attack", {})["decision_threshold"] = dynamic_results["selected_threshold"]
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
     model = DynamicGCNGRU(
         snapshots[0].x.size(1),
@@ -92,6 +94,12 @@ def test_attack_smoke_test_after_dynamic_training(tmp_path):
 
     result = run_low_rate_attack(model, snapshots, cfg, torch.device("cpu"))
 
-    assert result["injected_edges"] == 2
+    assert result["injected_edges"] <= 2
     assert result["attacked_metrics"]["n_samples"] > 0
+    assert result["stealth_constraints_enforced"] is True
+    assert result["target_selection_mode"] == "model_only_highest_probability"
+    if not result["attack_applicable"]:
+        assert result["attack_success"] is False
+        assert result["attack_success_rate_over_steps"] == 0.0
+    assert result["stealth_constraints"]["observed_max_degree_distribution_js"] <= 0.5
     assert len(result["fraud_probability_over_time"]) == 2
