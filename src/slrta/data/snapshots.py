@@ -218,6 +218,7 @@ def build_dynamic_snapshots(
             y=y,
         )
         data.labeled_mask = labeled_mask
+        data.active_mask = torch.tensor(visible, dtype=torch.bool)
         data.snapshot_id = t
         data.time_values = torch.tensor(ts_window, dtype=torch.long)
 
