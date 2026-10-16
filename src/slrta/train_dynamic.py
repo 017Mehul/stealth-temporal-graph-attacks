@@ -67,6 +67,8 @@ def main(config_path: str):
         if mask.any():
             ys.append(data.y[mask].cpu().numpy().astype(int))
     labels = np.concatenate(ys) if ys else np.array([], dtype=int)
+    if labels.size == 0:
+        raise RuntimeError("No labeled training nodes found in the chronological training split.")
     positives, negatives = int((labels == 1).sum()), int((labels == 0).sum())
     pos_weight = float(negatives / positives) if positives else 1.0
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=device))
@@ -76,6 +78,8 @@ def main(config_path: str):
 
     best_val_f1 = -1.0
     best_path = Path(cfg["paths"]["checkpoints_dir"]) / "dynamic_gcn_gru_best.pt"
+    if best_path.exists():
+        best_path.unlink()
     train_losses = []
     train_seq = [snapshots[i].to(device) for i in train_idx]
 
@@ -105,6 +109,8 @@ def main(config_path: str):
             raise RuntimeError("No labeled training nodes found in training snapshots")
         train_losses.append(epoch_loss_sum / update_steps)
         val_metrics = eval_dynamic(model, snapshots, val_idx, device)
+        if val_metrics["n_samples"] == 0:
+            raise RuntimeError("No labeled validation nodes; cannot select a checkpoint reliably.")
         print(f"epoch={epoch + 1}/{cfg['training']['epochs']} loss={train_losses[-1]:.6f} val_f1={val_metrics['f1']:.4f}")
         if val_metrics["f1"] > best_val_f1:
             best_val_f1 = val_metrics["f1"]
@@ -115,6 +121,8 @@ def main(config_path: str):
     model.load_state_dict(torch.load(best_path, map_location=device, weights_only=True))
     val_metrics = eval_dynamic(model, snapshots, val_idx, device)
     test_metrics = eval_dynamic(model, snapshots, test_idx, device)
+    if test_metrics["n_samples"] == 0:
+        raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
     out = {
         "model": "DynamicGCNGRU",
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
