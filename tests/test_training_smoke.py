@@ -95,5 +95,6 @@ def test_attack_smoke_test_after_dynamic_training(tmp_path):
     assert result["injected_edges"] <= 2
     assert result["attacked_metrics"]["n_samples"] > 0
     assert result["stealth_constraints_enforced"] is True
+    assert result["target_selection_mode"] == "model_only_highest_probability"
     assert result["stealth_constraints"]["observed_max_degree_distribution_js"] <= 0.5
     assert len(result["fraud_probability_over_time"]) == 2
