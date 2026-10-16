@@ -37,6 +37,13 @@ if __name__ == "__main__":
 
     model.load_state_dict(torch.load(ckpt, map_location=device))
 
+    threshold_path = Path(cfg["paths"]["metrics_dir"]) / "dynamic_results.json"
+    if threshold_path.exists():
+        threshold_results = json.loads(threshold_path.read_text(encoding="utf-8"))
+        cfg.setdefault("attack", {})["decision_threshold"] = float(
+            threshold_results.get("selected_threshold", 0.5)
+        )
+
     result = run_low_rate_attack(model, snapshots, cfg, device)
     save_attack_plots(result, cfg["paths"]["plots_dir"])
 
