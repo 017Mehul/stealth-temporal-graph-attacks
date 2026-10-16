@@ -180,6 +180,8 @@ def run_low_rate_attack(model, snapshots, cfg, device):
         "fraud_probability_over_time": fraud_prob_over_time,
         "test_indices": test_idx,
         "attacker_knowledge": "target-label oracle for benchmark analysis; parameters estimated from training snapshots only",
+        "stealth_constraints_enforced": False,
+        "stealth_note": "The simulator enforces an edge budget and training-period amount sampling only; it does not enforce a distributional stealth-similarity constraint.",
     }
 
 
