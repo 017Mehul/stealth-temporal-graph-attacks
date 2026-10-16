@@ -3,7 +3,11 @@ import json
 import torch
 import yaml
 
+from slrta.attack.low_rate import run_low_rate_attack
+from slrta.config import load_config
+from slrta.data.io import load_snapshots
 from slrta.data.snapshots import Data
+from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
 from slrta.train_baseline import main as train_baseline
 from slrta.train_dynamic import main as train_dynamic
 
@@ -47,6 +51,7 @@ def _write_tiny_training_fixture(root):
             "train_ratio": 0.6,
             "val_ratio": 0.2,
         },
+        "attack": {"attack_budget_per_window": 1, "attack_duration": 2},
     }
     cfg_path = root / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
@@ -69,3 +74,24 @@ def test_static_baseline_training_smoke_test(tmp_path):
     result = json.loads((root / "metrics" / "baseline_results.json").read_text())
     assert result["test_metrics"]["n_samples"] > 0
     assert (root / "checkpoints" / "static_gcn_best.pt").exists()
+
+
+
+def test_attack_smoke_test_after_dynamic_training(tmp_path):
+    cfg_path, root = _write_tiny_training_fixture(tmp_path / "attack")
+    train_dynamic(str(cfg_path))
+    cfg = load_config(str(cfg_path))
+    snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
+    model = DynamicGCNGRU(
+        snapshots[0].x.size(1),
+        cfg["training"]["hidden_dim"],
+        cfg["training"]["dropout"],
+    )
+    checkpoint = root / "checkpoints" / "dynamic_gcn_gru_best.pt"
+    model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+
+    result = run_low_rate_attack(model, snapshots, cfg, torch.device("cpu"))
+
+    assert result["injected_edges"] == 2
+    assert result["attacked_metrics"]["n_samples"] > 0
+    assert len(result["fraud_probability_over_time"]) == 2
