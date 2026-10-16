@@ -47,7 +47,7 @@ def collect_probs_and_labels(model, snapshots, indices, device, newly_observed_o
             data = snapshots[i].to(device)
             logits = model(data.x, data.edge_index)
             probs = torch.sigmoid(logits)
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
             if mask.sum() == 0:
                 continue
             y_true_all.append(data.y[mask].cpu().numpy().astype(int))
@@ -70,7 +70,7 @@ def collect_per_snapshot_metrics(model, snapshots, indices, device, threshold, n
         for idx in indices:
             data = snapshots[idx].to(device)
             probs = torch.sigmoid(model(data.x, data.edge_index))
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
             y_true = data.y[mask].cpu().numpy().astype(int)
             y_prob = probs[mask].cpu().numpy()
             metrics = compute_binary_metrics(y_true, y_prob, threshold=threshold)
@@ -83,7 +83,7 @@ def class_distribution(snapshots, indices, newly_observed_only=True):
     labels = []
     for idx in indices:
         data = snapshots[idx]
-        mask = data.labeled_mask & (data.y >= 0)
+        mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
         if mask.any():
             labels.append(data.y[mask].cpu().numpy().astype(int))
     values = np.concatenate(labels) if labels else np.array([], dtype=int)
@@ -120,14 +120,14 @@ def main(config_path: str):
     y_train_all, y_val_all = [], []
     for i in train_idx:
         data = snapshots[i]
-        mask = data.labeled_mask & (data.y >= 0)
+        mask = labeled_node_mask(data)
         if mask.sum() == 0:
             continue
         y_train_all.append(data.y[mask].cpu().numpy().astype(int))
 
     for i in val_idx:
         data = snapshots[i]
-        mask = data.labeled_mask & (data.y >= 0)
+        mask = labeled_node_mask(data)
         if mask.sum() == 0:
             continue
         y_val_all.append(data.y[mask].cpu().numpy().astype(int))
@@ -173,7 +173,7 @@ def main(config_path: str):
         total_loss = 0.0
         for i in train_idx:
             data = snapshots[i].to(device)
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data)
             if mask.sum() == 0:
                 continue
 
