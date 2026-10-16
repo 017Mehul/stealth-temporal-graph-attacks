@@ -10,7 +10,8 @@ Research code for studying temporal graph models and controlled edge-injection p
 - Ground-truth neighbor-label features have been disabled to avoid target leakage.
 - Node activation is tracked per snapshot; inactive nodes do not accumulate recurrent hidden state.
 - Feature scaling is fitted on training snapshots only, then reused without refitting on validation/test data.
-- Python regression tests and CI are included.
+- Python regression tests cover preprocessing, temporal state, attack intervention persistence, and synthetic end-to-end training/attack smoke runs.
+- The attack enforces a per-window edge budget but does not enforce a formal stealth-similarity constraint.
 - **Research caveat:** before treating any attack results as evidence, validate that interventions update all affected graph features and history consistently. The current attack simulator remains experimental and should not be described as validated or realistic.
 - No benchmark scores are published here because results must be rerun after these fixes.
 
@@ -59,7 +60,7 @@ python -m compileall -q src scripts tests
 pytest -q
 ```
 
-GitHub Actions runs the fast test suite on pushes and pull requests. These tests cover metrics edge cases and chronological split behavior; they do not replace a full dataset-backed training run.
+GitHub Actions runs the test suite on pushes and pull requests. Tests include metrics and split edge cases, Elliptic loader and causal timing checks, training-only scaling, inactive-node state, attack-edge persistence/recomputation, and synthetic end-to-end smoke runs for baseline, temporal training, and attack execution. They do not replace a full dataset-backed experiment.
 
 ## Evaluation protocol
 
@@ -72,7 +73,7 @@ GitHub Actions runs the fast test suite on pushes and pull requests. These tests
 
 ## Research limitations
 
-The Elliptic dataset is historical and labels are benchmark ground truth, not necessarily labels available to a live detector at transaction time. Any feature using labels must be treated as supervision only, never as a model input. Simulated edge injection is not evidence of evasion against a deployed financial institution. The attack pipeline requires further validation of causal graph updates, feature recomputation, attacker knowledge assumptions, and stealth constraints.
+The Elliptic dataset is historical and labels are benchmark ground truth, not necessarily labels available to a live detector at transaction time. Any feature using labels must be treated as supervision only, never as a model input. Simulated edge injection is not evidence of evasion against a deployed financial institution. The simulator enforces an edge budget and samples amounts from training-period data, but does not enforce a formal stealth-similarity constraint. Amount-based claims are not meaningful with the Elliptic placeholder amount. Validate the full dataset-backed pipeline and attacker-knowledge assumptions before making research claims.
 
 ## License
 
