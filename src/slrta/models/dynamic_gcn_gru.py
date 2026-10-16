@@ -31,7 +31,16 @@ class DynamicGCNGRU(nn.Module):
         z = self.encoder(data.x, data.edge_index)
         if h_prev is None:
             h_prev = torch.zeros_like(z)
-        h_t = self.gru_cell(z, h_prev)
+
+        # The node universe is global across snapshots, but a node must not
+        # accumulate recurrent state before its first observed transaction.
+        active_mask = getattr(data, "active_mask", None)
+        if active_mask is not None:
+            active = active_mask.to(device=z.device, dtype=z.dtype).unsqueeze(-1)
+            h_prev = h_prev * active
+            h_t = self.gru_cell(z, h_prev) * active
+        else:
+            h_t = self.gru_cell(z, h_prev)
         logits_t = self.head(h_t).squeeze(-1)
         return logits_t, h_t
 
