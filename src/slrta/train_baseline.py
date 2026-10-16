@@ -61,6 +61,35 @@ def collect_probs_and_labels(model, snapshots, indices, device):
     return y_true, y_prob
 
 
+
+def collect_per_snapshot_metrics(model, snapshots, indices, device, threshold):
+    """Return metrics for each snapshot separately, preserving chronological labels."""
+    model.eval()
+    results = []
+    with torch.no_grad():
+        for idx in indices:
+            data = snapshots[idx].to(device)
+            probs = torch.sigmoid(model(data.x, data.edge_index))
+            mask = data.labeled_mask & (data.y >= 0)
+            y_true = data.y[mask].cpu().numpy().astype(int)
+            y_prob = probs[mask].cpu().numpy()
+            metrics = compute_binary_metrics(y_true, y_prob, threshold=threshold)
+            metrics["snapshot_index"] = int(idx)
+            results.append(metrics)
+    return results
+
+
+def class_distribution(snapshots, indices):
+    labels = []
+    for idx in indices:
+        data = snapshots[idx]
+        mask = data.labeled_mask & (data.y >= 0)
+        if mask.any():
+            labels.append(data.y[mask].cpu().numpy().astype(int))
+    values = np.concatenate(labels) if labels else np.array([], dtype=int)
+    return {"negative": int((values == 0).sum()), "positive": int((values == 1).sum())}
+
+
 def main(config_path: str):
     cfg = load_config(config_path)
     ensure_dirs(cfg)
@@ -81,7 +110,7 @@ def main(config_path: str):
     # criterion will be created after computing `y_train` so we can derive pos_weight
     criterion = None
 
-    best_val_f1 = -1.0
+    best_val_score = -float("inf")
     best_path = Path(cfg["paths"]["checkpoints_dir"]) / "static_gcn_best.pt"
     if best_path.exists():
         best_path.unlink()
@@ -157,12 +186,17 @@ def main(config_path: str):
 
         train_losses.append(total_loss / max(1, len(train_idx)))
         val_metrics = evaluate(model, snapshots, val_idx, device)
+        checkpoint_score = val_metrics["pr_auc"]
+        checkpoint_metric = "pr_auc"
+        if checkpoint_score is None:
+            checkpoint_score = val_metrics["f1"]
+            checkpoint_metric = "f1_fallback_single_class_validation"
         print(
             f"epoch={epoch + 1}/{cfg['training']['epochs']} "
-            f"loss={train_losses[-1]:.6f} val_f1={val_metrics['f1']:.4f}"
+            f"loss={train_losses[-1]:.6f} val_pr_auc={val_metrics['pr_auc']}"
         )
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
+        if checkpoint_score > best_val_score:
+            best_val_score = checkpoint_score
             torch.save(model.state_dict(), best_path)
 
     model.load_state_dict(torch.load(best_path, map_location=device))
@@ -177,14 +211,27 @@ def main(config_path: str):
         raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
     print(f"Validation-selected threshold: {selected_threshold:.6f}")
 
+    test_per_snapshot = collect_per_snapshot_metrics(
+        model, snapshots, test_idx, device, threshold=selected_threshold
+    )
     out = {
         "model": "StaticGCN",
+        "config": cfg,
+        "dataset_provenance": {
+            "dataset_type": cfg.get("data", {}).get("dataset_type"),
+            "raw_dir": cfg["paths"].get("raw_dir"),
+            "dynamic_dir": cfg["paths"].get("dynamic_dir"),
+            "num_snapshots": len(snapshots),
+        },
+        "checkpoint_selection": "maximum validation PR-AUC; falls back to validation F1 if PR-AUC is undefined",
+        "test_per_snapshot_metrics": test_per_snapshot,
         "seed": int(cfg["project"]["seed"]),
         "selected_threshold": selected_threshold,
         "threshold_selection": "maximum validation F1; threshold frozen before test evaluation",
         "class_distribution": {
             "train": {"negative": int((y_train == 0).sum()), "positive": int((y_train == 1).sum())},
             "validation": {"negative": int((y_val_true == 0).sum()), "positive": int((y_val_true == 1).sum())},
+            "test": class_distribution(snapshots, test_idx),
         },
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
         "val_metrics": val_metrics,
