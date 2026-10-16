@@ -27,3 +27,14 @@ def split_indices(n: int, train_ratio: float, val_ratio: float):
             "adjust train_ratio/val_ratio."
         )
     return list(range(n_train)), list(range(n_train, n_train + n_val)), list(range(n_train + n_val, n))
+
+
+def labeled_node_mask(data, newly_observed_only=True):
+    """Return labeled nodes, restricting evaluation/training to first-seen nodes when available."""
+    if not hasattr(data, "y"):
+        raise AttributeError("Snapshot data is missing labels (y)")
+    mask = getattr(data, "labeled_mask", data.y >= 0).bool() & (data.y >= 0)
+    if newly_observed_only and hasattr(data, "new_node_mask"):
+        mask = mask & data.new_node_mask.bool()
+    return mask
+
