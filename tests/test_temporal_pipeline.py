@@ -32,7 +32,7 @@ def test_cumulative_snapshot_frequency_uses_elapsed_timestamps(tmp_path):
         {
             "source": ["A", "B"],
             "target": ["B", "C"],
-            "amount": [1.0, 1.0],
+            "amount": [1.0, 1000.0],
             "timestamp": [1, 2],
             "label": [0, 0],
             "source_label": [0, 0],
@@ -46,6 +46,8 @@ def test_cumulative_snapshot_frequency_uses_elapsed_timestamps(tmp_path):
     assert abs(snapshots[0].x[1, 4].item() - snapshots[1].x[1, 4].item()) < 1e-6
     assert snapshots[0].feature_mean.shape[0] == snapshots[0].x.shape[1]
     assert snapshots[0].feature_std.shape[0] == snapshots[0].x.shape[1]
+    # The future-only amount of 1000 must not influence the training-prefix scaler.
+    assert snapshots[0].feature_mean[2].item() == 1.0
     assert snapshots[0].active_mask.tolist() == [True, True, False]
     assert snapshots[1].active_mask.tolist() == [True, True, True]
 
@@ -108,3 +110,18 @@ def test_inactive_nodes_do_not_accumulate_gru_state():
     _, hidden = model.forward_step(data, previous)
 
     assert torch.count_nonzero(hidden[1]).item() == 0
+
+
+
+def test_snapshot_builder_rejects_invalid_window_size(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="window_size"):
+        build_dynamic_snapshots(
+            pd.DataFrame(
+                {"source": ["A"], "target": ["B"], "amount": [1.0],
+                 "timestamp": [1], "label": [0]}
+            ),
+            str(tmp_path),
+            window_size=0,
+        )
