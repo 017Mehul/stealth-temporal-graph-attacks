@@ -8,12 +8,15 @@ Research code for studying temporal graph models and controlled edge-injection p
 - Elliptic preprocessing preserves endpoint labels, masks unknown labels, and makes an edge visible only after both endpoint transactions have been observed.
 - Dynamic snapshots are cumulative and use chronological train/validation/test splits.
 - Ground-truth neighbor-label features have been disabled to avoid target leakage.
-- Node activation is tracked per snapshot; inactive nodes do not accumulate recurrent hidden state.
+- Node activation and first-seen masks are tracked per snapshot; inactive nodes do not accumulate recurrent hidden state, and labeled nodes are used for supervision/evaluation only at their first appearance.
 - Feature scaling is fitted on training snapshots only, then reused without refitting on validation/test data.
 - Python regression tests cover preprocessing, temporal state, attack intervention persistence, and synthetic end-to-end training/attack smoke runs.
-- The attack enforces a per-window edge budget but does not enforce a formal stealth-similarity constraint.
-- **Research caveat:** before treating any attack results as evidence, validate that interventions update all affected graph features and history consistently. The current attack simulator remains experimental and should not be described as validated or realistic.
-- No benchmark scores are published here because results must be rerun after these fixes.
+- The attack now rejects self-loops, duplicate directed edges, inactive endpoints, sources above a training-derived degree percentile, per-node degree increases beyond a configured cap, and interventions that exceed a configured Jensen–Shannon divergence bound on total, in-degree, and out-degree distributions.
+- Attack results report the measured degree-distribution divergence, rejected candidates, per-snapshot metrics, and the validation-selected decision threshold.
+- These are explicit **degree-structure constraints**, not proof of universal stealth: they do not constrain every graph statistic, transaction attribute, or detector-specific signal.
+- The default attack selects its target using model scores and node activity only; ground-truth labels are used only for post-hoc reporting. An explicit `oracle_highest_score_illicit` mode remains available for oracle upper-bound comparisons. Source selection never uses source labels.
+- Thresholds are selected on validation predictions only and frozen before test evaluation. A multi-seed runner reports mean and standard deviation.
+- Historical metrics from previous runs should not be treated as results from the updated code. Rerun experiments after pulling this branch.
 
 ## Dataset
 
@@ -38,7 +41,7 @@ pip install -r requirements.txt
 pip install pytest
 ```
 
-The default configuration uses CPU for portability. If CUDA is available, set `project.device: cuda` in `configs/default.yaml`.
+The default configuration uses CPU for portability. The graph convolution uses directed degree normalization with source out-degree and target in-degree. If CUDA is available, set `project.device: cuda` in `configs/default.yaml`.
 
 ## Run
 
@@ -49,9 +52,12 @@ python scripts/run_week1.py
 python scripts/train_baseline.py --config configs/default.yaml
 python scripts/train_dynamic.py --config configs/default.yaml
 python scripts/run_attack.py --config configs/default.yaml
+
+# Optional: full multi-seed experiments (compute-intensive; default seeds 42,43,44)
+python scripts/run_multiseed.py --config configs/default.yaml --seeds 42,43,44
 ```
 
-The dataset must be present locally before the pipeline can run. Training and attack scripts expect graph snapshots under `data/dynamic_graphs/`; checkpoints, metrics, and plots are written under `outputs/`.
+The dataset must be present locally before the pipeline can run. After pulling changes to the first-seen evaluation protocol, rerun `python scripts/run_week1.py --config configs/default.yaml` to regenerate snapshots with `new_node_mask`; training and attack scripts intentionally reject legacy Elliptic snapshots without this mask. Preprocessing also writes `data/processed/dataset_provenance.json` with source-file SHA-256 hashes, sizes, row/timestamp counts, preprocessing settings, and Python/dependency versions. Checkpoints, metrics, and plots are written under `outputs/`.
 
 ## Tests
 
@@ -60,20 +66,20 @@ python -m compileall -q src scripts tests
 pytest -q
 ```
 
-GitHub Actions runs the test suite on pushes and pull requests. Tests include metrics and split edge cases, Elliptic loader and causal timing checks, training-only scaling, inactive-node state, attack-edge persistence/recomputation, and synthetic end-to-end smoke runs for baseline, temporal training, and attack execution. They do not replace a full dataset-backed experiment.
+GitHub Actions runs compilation checks and the test suite on pushes and pull requests with Python 3.10, 3.11, and 3.12. Tests include metrics and split edge cases, Elliptic loader and causal timing checks, training-only scaling, inactive-node state, attack-edge persistence/recomputation, and synthetic end-to-end smoke runs for baseline, temporal training, and attack execution. They do not replace a full dataset-backed experiment.
 
 ## Evaluation protocol
 
 - Split snapshots chronologically, never randomly across time.
-- Select checkpoints and thresholds using validation data only.
-- Preserve hidden-state history when evaluating later time windows.
+- Select checkpoints by validation PR-AUC (falling back to validation F1 if PR-AUC is undefined). Calibrate the classification threshold by validation F1 and freeze it before test evaluation.
+- Preserve hidden-state history when evaluating later time windows. Primary test metrics use newly observed labeled nodes only; all-active pooled metrics are recorded separately as a transductive secondary view.
 - Report F1, precision, recall, ROC-AUC, and PR-AUC; ROC-AUC and PR-AUC are undefined for single-class evaluation sets and are recorded as `null`.
 - Report seeds, class distributions, dataset provenance, and configuration with any published results.
-- Run multiple seeds and compare clean and attacked cases before making robustness claims.
+- Run `scripts/run_multiseed.py` and report mean and standard deviation across seeds; compare clean and attacked cases before making robustness claims.
 
 ## Research limitations
 
-The Elliptic dataset is historical and labels are benchmark ground truth, not necessarily labels available to a live detector at transaction time. Any feature using labels must be treated as supervision only, never as a model input. Simulated edge injection is not evidence of evasion against a deployed financial institution. The simulator enforces an edge budget and samples amounts from training-period data, but does not enforce a formal stealth-similarity constraint. Amount-based claims are not meaningful with the Elliptic placeholder amount. Validate the full dataset-backed pipeline and attacker-knowledge assumptions before making research claims.
+The Elliptic dataset is historical and labels are benchmark ground truth, not necessarily labels available to a live detector at transaction time. Any feature using labels must be treated as supervision only, never as a model input. Simulated edge injection is not evidence of evasion against a deployed financial institution. The simulator enforces a per-window edge budget and configured local structural constraints, including a Jensen–Shannon divergence cap on degree distributions. This is a narrow operational definition of structural similarity, not proof of stealth against all graph statistics or a real detector. The default target selection uses model scores and node activity only; an optional test-label oracle mode is reported separately as an upper-bound benchmark. Attack success is counted only when the selected target is a ground-truth illicit node that was initially predicted positive; labels are used for post-hoc scoring, not target selection. Elliptic has no transaction amounts in the provided edge list, so the loader uses a placeholder amount; amount-based claims are not meaningful on this dataset. Validate the updated dataset-backed pipeline and attacker-knowledge assumptions before making research claims.
 
 ## License
 
