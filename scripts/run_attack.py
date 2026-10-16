@@ -22,7 +22,10 @@ if __name__ == "__main__":
     cfg = load_config(args.config)
     ensure_dirs(cfg)
 
-    device = torch.device(cfg["project"].get("device", "cpu"))
+    requested_device = cfg["project"].get("device", "cpu")
+    if requested_device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested in config but is unavailable; set project.device: cpu")
+    device = torch.device(requested_device)
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
 
     in_dim = snapshots[0].x.size(1)
