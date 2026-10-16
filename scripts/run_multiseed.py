@@ -47,6 +47,8 @@ def run_seed(base_config_path, seed, root_out):
     train_baseline(str(config_path))
     train_dynamic(str(config_path))
 
+    dynamic_results = json.loads((Path(cfg["paths"]["metrics_dir"]) / "dynamic_results.json").read_text(encoding="utf-8"))
+    cfg.setdefault("attack", {})["decision_threshold"] = float(dynamic_results.get("selected_threshold", 0.5))
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
     model = DynamicGCNGRU(
         snapshots[0].x.size(1),
