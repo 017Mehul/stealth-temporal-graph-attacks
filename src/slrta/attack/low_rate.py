@@ -295,9 +295,13 @@ def run_low_rate_attack(model, snapshots, cfg, device):
         amount_bounds = tuple(np.quantile(np.asarray(train_amounts), [0.25, 0.75]).tolist())
         amount_policy = "sampled from training-period amount interquartile range"
 
-    fraud_prob_over_time = []
+    target_probability_over_time = []
     injected_edges = 0
     successful_steps = 0
+    target_initial_probability = float(clean_probs[0, target_node])
+    target_initially_predicted_positive = target_initial_probability >= decision_threshold
+    target_label_posthoc = int(y0[target_node]) if y0[target_node] in (0, 1) else None
+    attack_applicable = bool(target_label_posthoc == 1 and target_initially_predicted_positive)
     degree_increments = {}
     rejected = {}
     max_observed_js = 0.0
@@ -347,25 +351,32 @@ def run_low_rate_attack(model, snapshots, cfg, device):
         _recompute_cumulative_features(attacked, snap_idx)
         current_prob = _predict_indices(model, attacked, [snap_idx], device)[0]
         p_target = float(current_prob[target_node])
-        fraud_prob_over_time.append(p_target)
-        successful_steps += int(p_target < decision_threshold)
+        target_probability_over_time.append(p_target)
+        successful_steps += int(attack_applicable and p_target < decision_threshold)
 
     attacked_metrics = evaluate_sequence_f1(model, attacked, test_idx, device, threshold=decision_threshold)
     attacked_per_snapshot = evaluate_per_snapshot(model, attacked, test_idx, device, threshold=decision_threshold)
     return {
         "target_node_index": int(target_node),
-        "target_label_posthoc": int(y0[target_node]) if y0[target_node] in (0, 1) else None,
-        "target_predicted_positive_before_attack": bool(clean_probs[0, target_node] >= decision_threshold),
+        "target_label_posthoc": target_label_posthoc,
+        "target_is_illicit_posthoc": bool(target_label_posthoc == 1) if target_label_posthoc is not None else None,
+        "target_initial_probability": target_initial_probability,
+        "target_initially_predicted_positive": bool(target_initially_predicted_positive),
+        "attack_applicable": attack_applicable,
         "target_selection_mode": target_selection_mode,
         "clean_metrics": clean_metrics,
         "attacked_metrics": attacked_metrics,
         "clean_per_snapshot_metrics": clean_per_snapshot,
         "attacked_per_snapshot_metrics": attacked_per_snapshot,
-        "attack_success": bool(fraud_prob_over_time and fraud_prob_over_time[-1] < decision_threshold),
+        "attack_success": bool(
+            attack_applicable and target_probability_over_time
+            and target_probability_over_time[-1] < decision_threshold
+        ),
         "decision_threshold": decision_threshold,
-        "attack_success_rate_over_steps": float(successful_steps / max(1, len(fraud_prob_over_time))),
+        "attack_success_rate_over_steps": float(successful_steps / max(1, len(target_probability_over_time))),
         "injected_edges": int(injected_edges),
-        "fraud_probability_over_time": fraud_prob_over_time,
+        "target_positive_probability_over_time": target_probability_over_time,
+        "fraud_probability_over_time": target_probability_over_time,
         "test_indices": test_idx,
         "seed": int(cfg["project"]["seed"]),
         "attacker_knowledge": ("test labels used only for post-hoc target reporting; target selected by model score and activity" if target_selection_mode == "model_only_highest_probability" else "oracle target-label selection on the first test snapshot; source selection uses model scores and structural constraints"),
@@ -390,12 +401,12 @@ def run_low_rate_attack(model, snapshots, cfg, device):
 def save_attack_plots(result: dict, plots_dir: str):
     out = Path(plots_dir)
     out.mkdir(parents=True, exist_ok=True)
-    probs = result["fraud_probability_over_time"]
+    probs = result.get("target_positive_probability_over_time", result["fraud_probability_over_time"])
     x = list(range(1, len(probs) + 1))
     plt.figure(figsize=(7, 4))
     plt.plot(x, probs, marker="o")
     plt.xlabel("Attack Time Step")
-    plt.ylabel("Target Fraud Probability")
+    plt.ylabel("Target Positive-Class Probability")
     plt.title("Target Probability Across Attack Steps")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
