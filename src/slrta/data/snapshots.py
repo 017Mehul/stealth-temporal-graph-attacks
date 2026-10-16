@@ -108,6 +108,18 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
     for node, label in node_labels.items():
         y_global[node_to_idx[node]] = label
 
+    # A node's first-seen time is the first transaction timestamp at which it
+    # appears in the observed edge stream. Earlier snapshots must not supervise
+    # a node that has not appeared yet.
+    first_seen = {}
+    for _, row in clean_df[["source", "target", "timestamp"]].iterrows():
+        ts = int(row["timestamp"])
+        for node in (str(row["source"]), str(row["target"])):
+            first_seen[node] = min(first_seen.get(node, ts), ts)
+    first_seen_arr = np.full((len(nodes),), np.iinfo(np.int64).max, dtype=np.int64)
+    for node, ts in first_seen.items():
+        first_seen_arr[node_to_idx[node]] = ts
+
     ts_values = sorted(clean_df["timestamp"].unique().tolist())
     windows = []
     start = 0
@@ -169,7 +181,10 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
                 historical_neighbors[s_i].add(int(d_i))
                 historical_neighbors[d_i].add(int(s_i))
 
-        y = torch.tensor(y_global, dtype=torch.float)
+        visible = first_seen_arr <= cutoff
+        y_snapshot = y_global.copy()
+        y_snapshot[~visible] = -1
+        y = torch.tensor(y_snapshot, dtype=torch.float)
         labeled_mask = (y >= 0)
 
         data = Data(
