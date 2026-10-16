@@ -1,6 +1,6 @@
 project:
   seed: 42
-  device: cuda
+  device: cpu
 
 paths:
   raw_dir: data/raw
@@ -30,4 +30,3 @@ training:
 attack:
   attack_budget_per_window: 1
   attack_duration: 10
-  stealth_similarity_threshold: 0.8

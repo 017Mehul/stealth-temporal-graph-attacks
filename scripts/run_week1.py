@@ -32,6 +32,7 @@ def main(config_path: str):
         cfg["paths"]["dynamic_dir"],
         window_size=cfg["data"]["window_size"],
         normalize_features=cfg["data"].get("normalize_features", True),
+        train_ratio=cfg["training"]["train_ratio"],
     )
 
     print(f"Saved cleaned transactions: {cfg['paths']['processed_csv']}")

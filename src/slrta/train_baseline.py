@@ -31,7 +31,7 @@ def evaluate(model, snapshots, indices, device):
             y_prob_all.append(probs[mask].cpu().numpy())
 
     if not y_true_all:
-        return {"f1": 0.0, "precision": 0.0, "recall": 0.0, "roc_auc": 0.5}
+        return compute_binary_metrics([], [])
 
     y_true = np.concatenate(y_true_all)
     y_prob = np.concatenate(y_prob_all)
@@ -82,6 +82,8 @@ def main(config_path: str):
 
     best_val_f1 = -1.0
     best_path = Path(cfg["paths"]["checkpoints_dir"]) / "static_gcn_best.pt"
+    if best_path.exists():
+        best_path.unlink()
     train_losses = []
 
     # Compute and print class distributions for train and validation sets
@@ -104,6 +106,10 @@ def main(config_path: str):
         y_train = np.concatenate(y_train_all)
     else:
         y_train = np.array([], dtype=int)
+    if y_train.size == 0:
+        raise RuntimeError("No labeled training nodes found in the chronological training split.")
+    if not y_val_all:
+        raise RuntimeError("No labeled validation nodes; cannot select a checkpoint reliably.")
 
     if y_val_all:
         y_val = np.concatenate(y_val_all)
@@ -161,6 +167,8 @@ def main(config_path: str):
     model.load_state_dict(torch.load(best_path, map_location=device))
     val_metrics = evaluate(model, snapshots, val_idx, device)
     test_metrics = evaluate(model, snapshots, test_idx, device)
+    if test_metrics["n_samples"] == 0:
+        raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
 
     # Collect probs and labels for validation to inspect prediction distribution
     y_val_true, y_val_prob = collect_probs_and_labels(model, snapshots, val_idx, device)
