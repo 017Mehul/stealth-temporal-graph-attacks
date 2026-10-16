@@ -1,4 +1,6 @@
 import torch
+
+MODEL_VERSION = "dynamic-gcn-gru-directed-normalization-v2"
 import torch.nn as nn
 import torch.nn.functional as F
 from .layers import MeanGraphConv
