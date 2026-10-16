@@ -30,4 +30,3 @@ training:
 attack:
   attack_budget_per_window: 1
   attack_duration: 10
-  stealth_similarity_threshold: 0.8
