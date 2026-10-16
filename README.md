@@ -8,6 +8,8 @@ Research code for studying temporal graph models and controlled edge-injection p
 - Elliptic preprocessing preserves endpoint labels and masks unknown labels.
 - Dynamic snapshots are cumulative and use chronological train/validation/test splits.
 - Ground-truth neighbor-label features have been disabled to avoid target leakage.
+- Node activation is tracked per snapshot; inactive nodes do not accumulate recurrent hidden state.
+- Feature scaling is fitted on training snapshots only, then reused without refitting on validation/test data.
 - Python regression tests and CI are included.
 - **Research caveat:** before treating any attack results as evidence, validate that interventions update all affected graph features and history consistently. The current attack simulator remains experimental and should not be described as validated or realistic.
 - No benchmark scores are published here because results must be rerun after these fixes.
