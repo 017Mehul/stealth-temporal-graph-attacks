@@ -5,7 +5,7 @@ Research code for studying temporal graph models and controlled edge-injection p
 ## Status and limitations
 
 - Static GCN baseline and GCN-GRU temporal model are implemented.
-- Elliptic preprocessing preserves endpoint labels and masks unknown labels.
+- Elliptic preprocessing preserves endpoint labels, masks unknown labels, and makes an edge visible only after both endpoint transactions have been observed.
 - Dynamic snapshots are cumulative and use chronological train/validation/test splits.
 - Ground-truth neighbor-label features have been disabled to avoid target leakage.
 - Node activation is tracked per snapshot; inactive nodes do not accumulate recurrent hidden state.
