@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class NormalizedGCNConv(nn.Module):
-    """Plain PyTorch normalized GCN: D^-1/2 A_hat D^-1/2 XW over edge_index."""
+    """Directed normalized message passing using D_in^-1/2 A_hat D_out^-1/2 XW."""
 
     def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
@@ -24,10 +24,14 @@ class NormalizedGCNConv(nn.Module):
             src = torch.cat([src, self_loop], dim=0)
             dst = torch.cat([dst, self_loop], dim=0)
 
-        deg = torch.zeros(n, device=x.device, dtype=h.dtype)
-        deg.index_add_(0, dst, torch.ones(dst.size(0), device=x.device, dtype=h.dtype))
-        deg_inv_sqrt = deg.clamp(min=1.0).pow(-0.5)
-        norm = deg_inv_sqrt[src] * deg_inv_sqrt[dst]
+        ones = torch.ones(src.size(0), device=x.device, dtype=h.dtype)
+        deg_out = torch.zeros(n, device=x.device, dtype=h.dtype)
+        deg_in = torch.zeros(n, device=x.device, dtype=h.dtype)
+        deg_out.index_add_(0, src, ones)
+        deg_in.index_add_(0, dst, ones)
+        deg_out_inv_sqrt = deg_out.clamp(min=1.0).pow(-0.5)
+        deg_in_inv_sqrt = deg_in.clamp(min=1.0).pow(-0.5)
+        norm = deg_out_inv_sqrt[src] * deg_in_inv_sqrt[dst]
 
         out = torch.zeros_like(h)
         out.index_add_(0, dst, h[src] * norm.unsqueeze(1))

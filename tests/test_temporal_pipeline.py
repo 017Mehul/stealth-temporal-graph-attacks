@@ -1,9 +1,16 @@
+import copy
+
 import pandas as pd
 import torch
 
-from slrta.attack.low_rate import _append_edge_to_future_snapshots, _recompute_cumulative_features
+from slrta.attack.low_rate import (
+    _append_edge_to_future_snapshots,
+    _candidate_passes_constraints,
+    _degree_distribution_js,
+    _recompute_cumulative_features,
+)
 from slrta.data.clean import load_elliptic
-from slrta.data.io import load_snapshots
+from slrta.data.io import load_snapshots, require_first_seen_masks
 from slrta.data.snapshots import Data, build_dynamic_snapshots
 from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
 
@@ -52,6 +59,8 @@ def test_cumulative_snapshot_frequency_uses_elapsed_timestamps(tmp_path):
     assert snapshots[0].feature_mean[2].item() == 1.0
     assert snapshots[0].active_mask.tolist() == [True, True, False]
     assert snapshots[1].active_mask.tolist() == [True, True, True]
+    assert snapshots[0].new_node_mask.tolist() == [True, True, False]
+    assert snapshots[1].new_node_mask.tolist() == [False, False, True]
 
 
 def test_injected_edge_persists_from_intervention_time_forward():
@@ -127,3 +136,75 @@ def test_snapshot_builder_rejects_invalid_window_size(tmp_path):
             str(tmp_path),
             window_size=0,
         )
+
+
+def test_attack_constraints_reject_self_loops_and_duplicate_edges():
+    snapshot = Data(
+        x=torch.zeros((3, 11)),
+        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+        edge_attr=torch.ones((1, 2)),
+        active_mask=torch.ones(3, dtype=torch.bool),
+    )
+    clean = [copy.deepcopy(snapshot)]
+    attacked = [copy.deepcopy(snapshot)]
+
+    self_loop = _candidate_passes_constraints(clean, attacked, 0, 1, 1, {}, 3, 0.5)
+    duplicate = _candidate_passes_constraints(clean, attacked, 0, 0, 1, {}, 3, 0.5)
+
+    assert self_loop[0] is False
+    assert self_loop[2] == "self_loop"
+    assert duplicate[0] is False
+    assert duplicate[2] == "duplicate_edge"
+
+
+def test_attack_constraints_reject_degree_distribution_shift():
+    snapshot = Data(
+        x=torch.zeros((4, 11)),
+        edge_index=torch.empty((2, 0), dtype=torch.long),
+        edge_attr=torch.empty((0, 2)),
+        active_mask=torch.ones(4, dtype=torch.bool),
+    )
+    clean = [copy.deepcopy(snapshot)]
+    attacked = [copy.deepcopy(snapshot)]
+
+    accepted, divergence, reason = _candidate_passes_constraints(
+        clean, attacked, 0, 0, 1, {}, 3, 0.0
+    )
+
+    assert accepted is False
+    assert divergence > 0.0
+    assert reason == "degree_distribution_js"
+
+
+def test_elliptic_training_rejects_legacy_snapshots_without_first_seen_masks():
+    legacy = [Data(x=torch.zeros((1, 11)), y=torch.tensor([0.0]))]
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="new_node_mask"):
+        require_first_seen_masks(legacy, "elliptic")
+
+
+def test_degree_similarity_ignores_inactive_future_node_padding():
+    def snapshots_with_padding(num_nodes):
+        active = torch.zeros(num_nodes, dtype=torch.bool)
+        active[:2] = True
+        clean = Data(
+            x=torch.zeros((num_nodes, 11)),
+            edge_index=torch.empty((2, 0), dtype=torch.long),
+            active_mask=active,
+        )
+        attacked = Data(
+            x=torch.zeros((num_nodes, 11)),
+            edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+            active_mask=active.clone(),
+        )
+        return clean, attacked
+
+    clean_small, attacked_small = snapshots_with_padding(4)
+    clean_large, attacked_large = snapshots_with_padding(8)
+
+    small_divergence = _degree_distribution_js(clean_small, attacked_small, "total")
+    large_divergence = _degree_distribution_js(clean_large, attacked_large, "total")
+
+    assert abs(small_divergence - large_divergence) < 1e-12
