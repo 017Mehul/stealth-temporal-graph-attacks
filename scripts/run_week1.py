@@ -1,7 +1,9 @@
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -19,6 +21,15 @@ def _sha256_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+
+def _package_installed(package_name):
+    try:
+        importlib.metadata.version(package_name)
+        return True
+    except importlib.metadata.PackageNotFoundError:
+        return False
 
 
 def _source_files(cfg):
@@ -86,6 +97,23 @@ def main(config_path: str):
             "normalize_features": bool(cfg["data"].get("normalize_features", True)),
             "remove_isolated_nodes": bool(cfg["data"].get("remove_isolated_nodes", False)),
             "train_ratio_for_scaler": float(cfg["training"]["train_ratio"]),
+        },
+        "environment": {
+            "python": platform.python_version(),
+            "packages": {
+                name: (
+                    importlib.metadata.version(package)
+                    if _package_installed(package) else None
+                )
+                for name, package in {
+                    "numpy": "numpy",
+                    "pandas": "pandas",
+                    "torch": "torch",
+                    "scikit_learn": "scikit-learn",
+                    "pyyaml": "PyYAML",
+                    "matplotlib": "matplotlib",
+                }.items()
+            },
         },
     }
     manifest_path = Path(cfg["paths"]["processed_csv"]).parent / "dataset_provenance.json"
