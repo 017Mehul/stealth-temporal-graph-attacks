@@ -90,7 +90,15 @@ def _recompute_cumulative_features(snapshots, start_index=0):
         cumulative_count = degree
         growth = degree - previous_degree
         temporal = np.column_stack([cumulative_count, growth, np.zeros(num_nodes, dtype=np.float32)])
-        snap.x = torch.tensor(np.concatenate([base, temporal], axis=1), dtype=torch.float32)
+        raw_features = torch.tensor(np.concatenate([base, temporal], axis=1), dtype=torch.float32)
+        feature_mean = getattr(snap, "feature_mean", None)
+        feature_std = getattr(snap, "feature_std", None)
+        if feature_mean is not None and feature_std is not None:
+            raw_features = (raw_features - feature_mean.cpu()) / feature_std.cpu()
+        active_mask = getattr(snap, "active_mask", None)
+        if active_mask is not None:
+            raw_features[~active_mask.cpu()] = 0.0
+        snap.x = raw_features
         previous_degree = degree
 
 
