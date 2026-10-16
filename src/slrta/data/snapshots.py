@@ -79,7 +79,10 @@ def compute_node_features(window_df: pd.DataFrame, node_to_idx: dict, window_siz
     return feats, degree_arr
 
 
-def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: int = 1, normalize_features: bool = True) -> None:
+def build_dynamic_snapshots(
+    clean_df: pd.DataFrame, out_dir: str, window_size: int = 1,
+    normalize_features: bool = True, train_ratio: float = 0.7,
+) -> None:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -136,6 +139,10 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
     historical_neighbors = [set() for _ in range(len(nodes))]
     # Ground-truth labels are supervision only, never model input features.
 
+    if not 0.0 < train_ratio < 1.0:
+        raise ValueError("train_ratio must be between 0 and 1")
+
+    snapshot_objects = []
     # Build cumulative snapshots: include edges with timestamp <= current window max
     for t, ts_window in enumerate(windows, start=1):
         cutoff = max(ts_window)
@@ -202,11 +209,42 @@ def build_dynamic_snapshots(clean_df: pd.DataFrame, out_dir: str, window_size: i
         data.snapshot_id = t
         data.time_values = torch.tensor(ts_window, dtype=torch.long)
 
-        torch.save(data, out_path / f"graph_{t}.pt")
+        snapshot_objects.append(data)
+
+    # Fit one scaler on active nodes in the chronological training prefix only.
+    # Reuse these statistics for validation/test and for attack feature updates.
+    train_count = max(1, int(len(snapshot_objects) * train_ratio))
+    if normalize_features:
+        fit_rows = [
+            snap.x[snap.active_mask] for snap in snapshot_objects[:train_count]
+            if bool(snap.active_mask.any())
+        ]
+        if not fit_rows:
+            raise ValueError("No active training nodes available to fit feature scaler")
+        fit_x = torch.cat(fit_rows, dim=0)
+        feature_mean = fit_x.mean(dim=0)
+        feature_std = fit_x.std(dim=0, unbiased=False)
+        feature_std[feature_std < 1e-6] = 1.0
+    else:
+        feature_mean = torch.zeros(snapshot_objects[0].x.size(1), dtype=torch.float32)
+        feature_std = torch.ones(snapshot_objects[0].x.size(1), dtype=torch.float32)
+
+    for t, snap in enumerate(snapshot_objects, start=1):
+        if normalize_features:
+            snap.x = (snap.x - feature_mean) / feature_std
+            # Keep future/inactive nodes at zero after applying the scaler.
+            snap.x[~snap.active_mask] = 0.0
+        snap.feature_mean = feature_mean.clone()
+        snap.feature_std = feature_std.clone()
+        torch.save(snap, out_path / f"graph_{t}.pt")
 
     metadata = {
         "num_nodes": len(nodes),
         "num_snapshots": len(windows),
+        "feature_mean": feature_mean,
+        "feature_std": feature_std,
+        "features_normalized": bool(normalize_features),
+        "scaler_fit_snapshots": train_count,
         "node_to_idx": node_to_idx,
         "idx_to_node": {i: n for n, i in node_to_idx.items()},
     }
