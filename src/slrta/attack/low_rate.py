@@ -263,6 +263,7 @@ def run_low_rate_attack(model, snapshots, cfg, device):
     degree_increments = {}
     rejected = {}
     max_observed_js = 0.0
+    max_rejected_js = 0.0
     accepted_constraints = True
     injected_pairs = set()
 
@@ -292,10 +293,11 @@ def run_low_rate_attack(model, snapshots, cfg, device):
                 clean_snapshots, attacked, snap_idx, int(source), target_node,
                 degree_increments, max_degree_increase, max_js_divergence,
             )
-            max_observed_js = max(max_observed_js, divergence)
             if not ok:
+                max_rejected_js = max(max_rejected_js, divergence)
                 rejected[reason] = rejected.get(reason, 0) + 1
                 continue
+            max_observed_js = max(max_observed_js, divergence)
             amount = float(np.random.uniform(*amount_bounds)) if amount_bounds[1] > amount_bounds[0] else float(amount_bounds[0])
             _append_edge_to_future_snapshots(attacked, snap_idx, int(source), target_node, amount, ts_val)
             injected_pairs.add((int(source), target_node))
@@ -336,6 +338,7 @@ def run_low_rate_attack(model, snapshots, cfg, device):
             "max_degree_increase_per_node": max_degree_increase,
             "max_degree_distribution_js": max_js_divergence,
             "observed_max_degree_distribution_js": float(max_observed_js),
+            "max_rejected_candidate_degree_distribution_js": float(max_rejected_js),
             "rejected_candidates_by_reason": rejected,
         },
         "stealth_note": "Constraints enforce degree-distribution similarity and local graph validity only; they do not prove stealth against all graph statistics or a real deployed detector.",
