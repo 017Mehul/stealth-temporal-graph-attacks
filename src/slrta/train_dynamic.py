@@ -64,6 +64,38 @@ def collect_dynamic_probs_and_labels(model, snapshots, indices, device):
     return np.concatenate(y_true_all), np.concatenate(y_prob_all)
 
 
+
+def eval_dynamic_per_snapshot(model, snapshots, indices, device, threshold):
+    """Report metrics per snapshot after warming recurrent state chronologically."""
+    if not indices:
+        raise ValueError("Evaluation split is empty")
+    model.eval()
+    results = []
+    with torch.no_grad():
+        seq = [copy.deepcopy(snapshots[i]).to(device) for i in range(max(indices) + 1)]
+        probs_tn = torch.sigmoid(model.forward_embeddings(seq))
+        for idx in indices:
+            data = snapshots[idx]
+            mask = data.labeled_mask & (data.y >= 0)
+            y_true = data.y[mask].cpu().numpy().astype(int)
+            y_prob = probs_tn[idx][mask.to(device)].cpu().numpy()
+            metrics = compute_binary_metrics(y_true, y_prob, threshold=threshold)
+            metrics["snapshot_index"] = int(idx)
+            results.append(metrics)
+    return results
+
+
+def class_distribution(snapshots, indices):
+    labels = []
+    for idx in indices:
+        data = snapshots[idx]
+        mask = data.labeled_mask & (data.y >= 0)
+        if mask.any():
+            labels.append(data.y[mask].cpu().numpy().astype(int))
+    values = np.concatenate(labels) if labels else np.array([], dtype=int)
+    return {"negative": int((values == 0).sum()), "positive": int((values == 1).sum())}
+
+
 def main(config_path: str):
     cfg = load_config(config_path)
     ensure_dirs(cfg)
@@ -100,7 +132,7 @@ def main(config_path: str):
     if truncate_bptt < 1:
         raise ValueError("training.truncate_bptt must be >= 1")
 
-    best_val_f1 = -1.0
+    best_val_score = -float("inf")
     best_path = Path(cfg["paths"]["checkpoints_dir"]) / "dynamic_gcn_gru_best.pt"
     if best_path.exists():
         best_path.unlink()
@@ -135,9 +167,15 @@ def main(config_path: str):
         val_metrics = eval_dynamic(model, snapshots, val_idx, device)
         if val_metrics["n_samples"] == 0:
             raise RuntimeError("No labeled validation nodes; cannot select a checkpoint reliably.")
-        print(f"epoch={epoch + 1}/{cfg['training']['epochs']} loss={train_losses[-1]:.6f} val_f1={val_metrics['f1']:.4f}")
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
+        checkpoint_score = val_metrics["pr_auc"]
+        if checkpoint_score is None:
+            checkpoint_score = val_metrics["f1"]
+        print(
+            f"epoch={epoch + 1}/{cfg['training']['epochs']} "
+            f"loss={train_losses[-1]:.6f} val_pr_auc={val_metrics['pr_auc']}"
+        )
+        if checkpoint_score > best_val_score:
+            best_val_score = checkpoint_score
             torch.save(model.state_dict(), best_path)
 
     if not best_path.exists():
@@ -153,13 +191,26 @@ def main(config_path: str):
     if test_metrics["n_samples"] == 0:
         raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
     print(f"Validation-selected threshold: {selected_threshold:.6f}")
+    test_per_snapshot = eval_dynamic_per_snapshot(
+        model, snapshots, test_idx, device, threshold=selected_threshold
+    )
     out = {
         "model": "DynamicGCNGRU",
+        "config": cfg,
+        "dataset_provenance": {
+            "dataset_type": cfg.get("data", {}).get("dataset_type"),
+            "raw_dir": cfg["paths"].get("raw_dir"),
+            "dynamic_dir": cfg["paths"].get("dynamic_dir"),
+            "num_snapshots": len(snapshots),
+        },
+        "checkpoint_selection": "maximum validation PR-AUC; falls back to validation F1 if PR-AUC is undefined",
+        "test_per_snapshot_metrics": test_per_snapshot,
         "selected_threshold": selected_threshold,
         "threshold_selection": "maximum validation F1; threshold frozen before test evaluation",
         "class_distribution": {
             "train": {"negative": int((labels == 0).sum()), "positive": int((labels == 1).sum())},
             "validation": {"negative": int((y_val_true == 0).sum()), "positive": int((y_val_true == 1).sum())},
+            "test": class_distribution(snapshots, test_idx),
         },
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
         "val_metrics": val_metrics, "test_metrics": test_metrics,
