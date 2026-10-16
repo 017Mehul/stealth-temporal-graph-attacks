@@ -1,5 +1,6 @@
 import argparse
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from slrta.config import ensure_dirs, load_config, set_seed
 from slrta.data.io import labeled_node_mask, load_snapshots, require_first_seen_masks, split_indices
 from slrta.eval.metrics import compute_binary_metrics
 from slrta.eval.thresholds import select_f1_threshold
-from slrta.models.dynamic_gcn_gru import DynamicGCNGRU
+from slrta.models.dynamic_gcn_gru import MODEL_VERSION, DynamicGCNGRU
 
 
 def eval_dynamic(model, snapshots, indices, device, threshold=0.5, newly_observed_only=True):
@@ -201,6 +202,8 @@ def main(config_path: str):
     )
     out = {
         "model": "DynamicGCNGRU",
+        "model_version": MODEL_VERSION,
+        "checkpoint_sha256": hashlib.sha256(best_path.read_bytes()).hexdigest(),
         "config": cfg,
         "dataset_provenance": {
             "dataset_type": cfg.get("data", {}).get("dataset_type"),
