@@ -11,7 +11,7 @@ except ImportError:
         return it
 
 from slrta.config import ensure_dirs, load_config, set_seed
-from slrta.data.io import labeled_node_mask, load_snapshots, split_indices
+from slrta.data.io import labeled_node_mask, load_snapshots, require_first_seen_masks, split_indices
 from slrta.eval.metrics import compute_binary_metrics
 from slrta.eval.thresholds import select_f1_threshold
 from slrta.models.static_gcn import StaticGCN
@@ -100,6 +100,7 @@ def main(config_path: str):
         raise RuntimeError("CUDA was requested in config but is unavailable; set project.device: cpu")
     device = torch.device(requested_device)
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
+    require_first_seen_masks(snapshots, cfg.get("data", {}).get("dataset_type", "generic"))
     train_idx, val_idx, test_idx = split_indices(
         len(snapshots),
         cfg["training"]["train_ratio"],
