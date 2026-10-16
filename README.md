@@ -11,9 +11,12 @@ Research code for studying temporal graph models and controlled edge-injection p
 - Node activation is tracked per snapshot; inactive nodes do not accumulate recurrent hidden state.
 - Feature scaling is fitted on training snapshots only, then reused without refitting on validation/test data.
 - Python regression tests cover preprocessing, temporal state, attack intervention persistence, and synthetic end-to-end training/attack smoke runs.
-- The attack enforces a per-window edge budget but does not enforce a formal stealth-similarity constraint.
-- **Research caveat:** before treating any attack results as evidence, validate that interventions update all affected graph features and history consistently. The current attack simulator remains experimental and should not be described as validated or realistic.
-- No benchmark scores are published here because results must be rerun after these fixes.
+- The attack now rejects self-loops, duplicate directed edges, inactive endpoints, sources above a training-derived degree percentile, per-node degree increases beyond a configured cap, and interventions that exceed a configured Jensen–Shannon divergence bound on degree distributions.
+- Attack results report the measured degree-distribution divergence, rejected candidates, per-snapshot metrics, and the validation-selected decision threshold.
+- These are explicit **degree-structure constraints**, not proof of universal stealth: they do not constrain every graph statistic, transaction attribute, or detector-specific signal.
+- The Elliptic target-selection experiment still uses a test-label oracle, explicitly recorded as a benchmark assumption. Source selection does not use source labels.
+- Thresholds are selected on validation predictions only and frozen before test evaluation. A multi-seed runner reports mean and standard deviation.
+- Historical metrics from previous runs should not be treated as results from the updated code. Rerun experiments after pulling this branch.
 
 ## Dataset
 
@@ -49,6 +52,9 @@ python scripts/run_week1.py
 python scripts/train_baseline.py --config configs/default.yaml
 python scripts/train_dynamic.py --config configs/default.yaml
 python scripts/run_attack.py --config configs/default.yaml
+
+# Optional: full multi-seed experiments (compute-intensive; default seeds 42,43,44)
+python scripts/run_multiseed.py --config configs/default.yaml --seeds 42,43,44
 ```
 
 The dataset must be present locally before the pipeline can run. Training and attack scripts expect graph snapshots under `data/dynamic_graphs/`; checkpoints, metrics, and plots are written under `outputs/`.
@@ -65,15 +71,15 @@ GitHub Actions runs the test suite on pushes and pull requests. Tests include me
 ## Evaluation protocol
 
 - Split snapshots chronologically, never randomly across time.
-- Select checkpoints and thresholds using validation data only.
+- Select checkpoints and thresholds using validation data only; the selected threshold is frozen before test evaluation.
 - Preserve hidden-state history when evaluating later time windows.
 - Report F1, precision, recall, ROC-AUC, and PR-AUC; ROC-AUC and PR-AUC are undefined for single-class evaluation sets and are recorded as `null`.
 - Report seeds, class distributions, dataset provenance, and configuration with any published results.
-- Run multiple seeds and compare clean and attacked cases before making robustness claims.
+- Run `scripts/run_multiseed.py` and report mean and standard deviation across seeds; compare clean and attacked cases before making robustness claims.
 
 ## Research limitations
 
-The Elliptic dataset is historical and labels are benchmark ground truth, not necessarily labels available to a live detector at transaction time. Any feature using labels must be treated as supervision only, never as a model input. Simulated edge injection is not evidence of evasion against a deployed financial institution. The simulator enforces an edge budget and samples amounts from training-period data, but does not enforce a formal stealth-similarity constraint. Amount-based claims are not meaningful with the Elliptic placeholder amount. Validate the full dataset-backed pipeline and attacker-knowledge assumptions before making research claims.
+The Elliptic dataset is historical and labels are benchmark ground truth, not necessarily labels available to a live detector at transaction time. Any feature using labels must be treated as supervision only, never as a model input. Simulated edge injection is not evidence of evasion against a deployed financial institution. The simulator enforces a per-window edge budget and configured local structural constraints, including a Jensen–Shannon divergence cap on degree distributions. This is a narrow operational definition of structural similarity, not proof of stealth against all graph statistics or a real detector. The target-label oracle remains a benchmark assumption. Elliptic has no transaction amounts in the provided edge list, so the loader uses a placeholder amount; amount-based claims are not meaningful on this dataset. Validate the updated dataset-backed pipeline and attacker-knowledge assumptions before making research claims.
 
 ## License
 
