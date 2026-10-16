@@ -23,7 +23,9 @@ def test_elliptic_loader_maps_both_endpoint_labels_and_timestamps(tmp_path):
 
     assert result["source_label"].tolist() == [1, 0]
     assert result["target_label"].tolist() == [0, -1]
-    assert result["timestamp"].tolist() == [1, 2]
+    assert result["timestamp"].tolist() == [2, 3]
+    assert result["source_timestamp"].tolist() == [1, 2]
+    assert result["target_timestamp"].tolist() == [2, 3]
     assert result["amount"].tolist() == [1.0, 1.0]
 
 
