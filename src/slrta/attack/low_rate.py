@@ -63,15 +63,19 @@ def evaluate_per_snapshot(model, snapshots, indices, device, threshold=0.5):
     return results
 
 
-def _degree_vector(snapshot):
+def _degree_components(snapshot):
     edge_index = snapshot.edge_index.detach().cpu().numpy()
     n = int(snapshot.x.size(0))
     if edge_index.size == 0:
-        return np.zeros(n, dtype=np.int64)
-    return (
-        np.bincount(edge_index[0], minlength=n)
-        + np.bincount(edge_index[1], minlength=n)
-    ).astype(np.int64)
+        zeros = np.zeros(n, dtype=np.int64)
+        return {"in": zeros.copy(), "out": zeros.copy(), "total": zeros.copy()}
+    out_degree = np.bincount(edge_index[0], minlength=n).astype(np.int64)
+    in_degree = np.bincount(edge_index[1], minlength=n).astype(np.int64)
+    return {"in": in_degree, "out": out_degree, "total": in_degree + out_degree}
+
+
+def _degree_vector(snapshot):
+    return _degree_components(snapshot)["total"]
 
 
 def _js_divergence(p, q):
@@ -89,9 +93,9 @@ def _js_divergence(p, q):
     return 0.5 * kl(p, m) + 0.5 * kl(q, m)
 
 
-def _degree_distribution_js(clean_snapshot, candidate_snapshot):
-    clean_degree = _degree_vector(clean_snapshot)
-    candidate_degree = _degree_vector(candidate_snapshot)
+def _degree_distribution_js(clean_snapshot, candidate_snapshot, component="total"):
+    clean_degree = _degree_components(clean_snapshot)[component]
+    candidate_degree = _degree_components(candidate_snapshot)[component]
     max_degree = int(max(clean_degree.max(initial=0), candidate_degree.max(initial=0)))
     clean_hist = np.bincount(clean_degree, minlength=max_degree + 1)
     candidate_hist = np.bincount(candidate_degree, minlength=max_degree + 1)
@@ -138,7 +142,11 @@ def _candidate_passes_constraints(
         candidate = copy.deepcopy(snap)
         edge = torch.tensor([[int(source)], [int(target)]], dtype=torch.long)
         candidate.edge_index = torch.cat([candidate.edge_index.cpu(), edge], dim=1)
-        divergence = _degree_distribution_js(clean_snapshots[idx], candidate)
+        divergences = {
+            component: _degree_distribution_js(clean_snapshots[idx], candidate, component)
+            for component in ("total", "in", "out")
+        }
+        divergence = max(divergences.values())
         max_observed_js = max(max_observed_js, divergence)
         if divergence > max_js_divergence:
             return False, max_observed_js, "degree_distribution_js"
@@ -390,6 +398,7 @@ def run_low_rate_attack(model, snapshots, cfg, device):
             "source_degree_percentile_cap": float(attack_cfg.get("source_degree_percentile", 95.0)),
             "max_degree_increase_per_node": max_degree_increase,
             "max_degree_distribution_js": max_js_divergence,
+            "constrained_degree_distributions": ["total", "in", "out"],
             "observed_max_degree_distribution_js": float(max_observed_js),
             "max_rejected_candidate_degree_distribution_js": float(max_rejected_js),
             "rejected_candidates_by_reason": rejected,
