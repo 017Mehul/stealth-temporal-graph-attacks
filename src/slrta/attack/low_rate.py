@@ -10,7 +10,8 @@ from slrta.eval.metrics import compute_binary_metrics
 
 
 def _to_device_snapshots(snapshots, device):
-    return [s.to(device) for s in snapshots]
+    # PyG Data.to() mutates in place; keep the attack's working graphs on CPU.
+    return [copy.deepcopy(s).to(device) for s in snapshots]
 
 
 def predict_dynamic(model, snapshots, device):
