@@ -11,13 +11,13 @@ except ImportError:
         return it
 
 from slrta.config import ensure_dirs, load_config, set_seed
-from slrta.data.io import load_snapshots, split_indices
+from slrta.data.io import labeled_node_mask, load_snapshots, split_indices
 from slrta.eval.metrics import compute_binary_metrics
 from slrta.eval.thresholds import select_f1_threshold
 from slrta.models.static_gcn import StaticGCN
 
 
-def evaluate(model, snapshots, indices, device, threshold=0.5):
+def evaluate(model, snapshots, indices, device, threshold=0.5, newly_observed_only=True):
     model.eval()
     y_true_all, y_prob_all = [], []
     with torch.no_grad():
@@ -25,7 +25,7 @@ def evaluate(model, snapshots, indices, device, threshold=0.5):
             data = snapshots[i].to(device)
             logits = model(data.x, data.edge_index)
             probs = torch.sigmoid(logits)
-            mask = data.labeled_mask & (data.y >= 0)
+            mask = labeled_node_mask(data, newly_observed_only=newly_observed_only)
             if mask.sum() == 0:
                 continue
             y_true_all.append(data.y[mask].cpu().numpy().astype(int))
@@ -39,7 +39,7 @@ def evaluate(model, snapshots, indices, device, threshold=0.5):
     return compute_binary_metrics(y_true, y_prob, threshold=threshold)
 
 
-def collect_probs_and_labels(model, snapshots, indices, device):
+def collect_probs_and_labels(model, snapshots, indices, device, newly_observed_only=True):
     model.eval()
     y_true_all, y_prob_all = [], []
     with torch.no_grad():
@@ -62,7 +62,7 @@ def collect_probs_and_labels(model, snapshots, indices, device):
 
 
 
-def collect_per_snapshot_metrics(model, snapshots, indices, device, threshold):
+def collect_per_snapshot_metrics(model, snapshots, indices, device, threshold, newly_observed_only=True):
     """Return metrics for each snapshot separately, preserving chronological labels."""
     model.eval()
     results = []
@@ -79,7 +79,7 @@ def collect_per_snapshot_metrics(model, snapshots, indices, device, threshold):
     return results
 
 
-def class_distribution(snapshots, indices):
+def class_distribution(snapshots, indices, newly_observed_only=True):
     labels = []
     for idx in indices:
         data = snapshots[idx]
@@ -95,7 +95,10 @@ def main(config_path: str):
     ensure_dirs(cfg)
     set_seed(cfg["project"]["seed"])
 
-    device = torch.device(cfg["project"].get("device", "cpu"))
+    requested_device = cfg["project"].get("device", "cpu")
+    if requested_device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested in config but is unavailable; set project.device: cpu")
+    device = torch.device(requested_device)
     snapshots = load_snapshots(cfg["paths"]["dynamic_dir"])
     train_idx, val_idx, test_idx = split_indices(
         len(snapshots),
@@ -106,9 +109,6 @@ def main(config_path: str):
     in_dim = snapshots[0].x.size(1)
     model = StaticGCN(in_dim, cfg["training"]["hidden_dim"], cfg["training"]["dropout"]).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg["training"]["lr"], weight_decay=cfg["training"]["weight_decay"])
-
-    # criterion will be created after computing `y_train` so we can derive pos_weight
-    criterion = None
 
     best_val_score = -float("inf")
     best_path = Path(cfg["paths"]["checkpoints_dir"]) / "static_gcn_best.pt"
@@ -187,10 +187,8 @@ def main(config_path: str):
         train_losses.append(total_loss / max(1, len(train_idx)))
         val_metrics = evaluate(model, snapshots, val_idx, device)
         checkpoint_score = val_metrics["pr_auc"]
-        checkpoint_metric = "pr_auc"
         if checkpoint_score is None:
             checkpoint_score = val_metrics["f1"]
-            checkpoint_metric = "f1_fallback_single_class_validation"
         print(
             f"epoch={epoch + 1}/{cfg['training']['epochs']} "
             f"loss={train_losses[-1]:.6f} val_pr_auc={val_metrics['pr_auc']}"
@@ -207,6 +205,10 @@ def main(config_path: str):
     selected_threshold = select_f1_threshold(y_val_true, y_val_prob)
     val_metrics = evaluate(model, snapshots, val_idx, device, threshold=selected_threshold)
     test_metrics = evaluate(model, snapshots, test_idx, device, threshold=selected_threshold)
+    all_active_test_metrics = evaluate(
+        model, snapshots, test_idx, device,
+        threshold=selected_threshold, newly_observed_only=False,
+    )
     if test_metrics["n_samples"] == 0:
         raise RuntimeError("No labeled test nodes; refusing to report empty-split metrics.")
     print(f"Validation-selected threshold: {selected_threshold:.6f}")
@@ -224,7 +226,9 @@ def main(config_path: str):
             "num_snapshots": len(snapshots),
         },
         "checkpoint_selection": "maximum validation PR-AUC; falls back to validation F1 if PR-AUC is undefined",
+        "evaluation_cohort": "newly observed labeled nodes only; nodes are supervised/evaluated once at first appearance",
         "test_per_snapshot_metrics": test_per_snapshot,
+        "all_active_test_metrics_secondary": all_active_test_metrics,
         "seed": int(cfg["project"]["seed"]),
         "selected_threshold": selected_threshold,
         "threshold_selection": "maximum validation F1; threshold frozen before test evaluation",
@@ -232,6 +236,7 @@ def main(config_path: str):
             "train": {"negative": int((y_train == 0).sum()), "positive": int((y_train == 1).sum())},
             "validation": {"negative": int((y_val_true == 0).sum()), "positive": int((y_val_true == 1).sum())},
             "test": class_distribution(snapshots, test_idx),
+            "test_all_active_secondary": class_distribution(snapshots, test_idx, newly_observed_only=False),
         },
         "split": {"train": train_idx, "val": val_idx, "test": test_idx},
         "val_metrics": val_metrics,
