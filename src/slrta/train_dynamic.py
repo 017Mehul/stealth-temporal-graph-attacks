@@ -200,17 +200,23 @@ def main(config_path: str):
     test_per_snapshot = eval_dynamic_per_snapshot(
         model, snapshots, test_idx, device, threshold=selected_threshold
     )
+    dataset_provenance = {
+        "dataset_type": cfg.get("data", {}).get("dataset_type"),
+        "raw_dir": cfg["paths"].get("raw_dir"),
+        "dynamic_dir": cfg["paths"].get("dynamic_dir"),
+        "num_snapshots": len(snapshots),
+    }
+    manifest_path = Path(cfg["paths"]["processed_csv"]).parent / "dataset_provenance.json"
+    if manifest_path.exists():
+        dataset_provenance["source_manifest"] = json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        )
     out = {
         "model": "DynamicGCNGRU",
         "model_version": MODEL_VERSION,
         "checkpoint_sha256": hashlib.sha256(best_path.read_bytes()).hexdigest(),
         "config": cfg,
-        "dataset_provenance": {
-            "dataset_type": cfg.get("data", {}).get("dataset_type"),
-            "raw_dir": cfg["paths"].get("raw_dir"),
-            "dynamic_dir": cfg["paths"].get("dynamic_dir"),
-            "num_snapshots": len(snapshots),
-        },
+        "dataset_provenance": dataset_provenance,
         "checkpoint_selection": "maximum validation PR-AUC; falls back to validation F1 if PR-AUC is undefined",
         "evaluation_cohort": "newly observed labeled nodes only; nodes are supervised/evaluated once at first appearance",
         "test_per_snapshot_metrics": test_per_snapshot,
