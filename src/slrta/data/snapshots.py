@@ -162,6 +162,7 @@ def build_dynamic_snapshots(
         raise ValueError("train_ratio must be between 0 and 1")
 
     snapshot_objects = []
+    previous_visible = np.zeros((len(nodes),), dtype=bool)
     # Build cumulative snapshots: include edges with timestamp <= current window max
     for t, ts_window in enumerate(windows, start=1):
         cutoff = max(ts_window)
@@ -204,6 +205,8 @@ def build_dynamic_snapshots(
             edge_attr = torch.tensor(wdf[["amount", "timestamp"]].to_numpy(dtype=np.float32), dtype=torch.float)
 
         visible = first_seen_arr <= cutoff
+        new_nodes = visible & ~previous_visible
+        previous_visible = visible.copy()
         y_snapshot = y_global.copy()
         y_snapshot[~visible] = -1
         y = torch.tensor(y_snapshot, dtype=torch.float)
@@ -217,6 +220,7 @@ def build_dynamic_snapshots(
         )
         data.labeled_mask = labeled_mask
         data.active_mask = torch.tensor(visible, dtype=torch.bool)
+        data.new_node_mask = torch.tensor(new_nodes, dtype=torch.bool)
         data.snapshot_id = t
         data.time_values = torch.tensor(ts_window, dtype=torch.long)
 
