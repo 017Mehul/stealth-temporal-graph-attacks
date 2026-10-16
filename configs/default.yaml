@@ -28,6 +28,7 @@ training:
   val_ratio: 0.15
 
 attack:
+  target_selection: model_only_highest_probability
   attack_budget_per_window: 1
   attack_duration: 10
   source_degree_percentile: 95
