@@ -96,6 +96,14 @@ def _js_divergence(p, q):
 def _degree_distribution_js(clean_snapshot, candidate_snapshot, component="total"):
     clean_degree = _degree_components(clean_snapshot)[component]
     candidate_degree = _degree_components(candidate_snapshot)[component]
+    active_mask = getattr(
+        clean_snapshot, "active_mask",
+        torch.ones(clean_snapshot.x.size(0), dtype=torch.bool),
+    ).detach().cpu().numpy()
+    # Exclude globally indexed future nodes; their inactive zero-degree padding
+    # must not make an intervention appear more similar than it is.
+    clean_degree = clean_degree[active_mask]
+    candidate_degree = candidate_degree[active_mask]
     max_degree = int(max(clean_degree.max(initial=0), candidate_degree.max(initial=0)))
     clean_hist = np.bincount(clean_degree, minlength=max_degree + 1)
     candidate_hist = np.bincount(candidate_degree, minlength=max_degree + 1)
