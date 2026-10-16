@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from slrta.data.io import split_indices
+from slrta.data.io import labeled_node_mask, split_indices
 from slrta.eval.metrics import compute_binary_metrics
 
 
@@ -35,7 +35,7 @@ def _labels_and_probs(model, snapshots, indices, device):
     labels, predictions = [], []
     for local_idx, snapshot_idx in enumerate(indices):
         data = snapshots[snapshot_idx]
-        mask = (data.labeled_mask & (data.y >= 0)).cpu().numpy()
+        mask = labeled_node_mask(data).cpu().numpy()
         if mask.any():
             labels.append(data.y.cpu().numpy()[mask].astype(int))
             predictions.append(probs[local_idx][mask])
@@ -220,9 +220,17 @@ def run_low_rate_attack(model, snapshots, cfg, device):
     active_first = getattr(
         first_test, "active_mask", torch.ones_like(first_test.y, dtype=torch.bool)
     ).cpu().numpy()
-    active_candidates = np.flatnonzero(active_first)
+    candidate_mask = getattr(
+        first_test, "new_node_mask", getattr(
+            first_test, "active_mask", torch.ones_like(first_test.y, dtype=torch.bool)
+        )
+    ).cpu().numpy() & active_first
+    # Older/prebuilt synthetic snapshots may not include first-seen masks.
+    if not candidate_mask.any():
+        candidate_mask = active_first
+    active_candidates = np.flatnonzero(candidate_mask)
     if not len(active_candidates):
-        raise RuntimeError("No active nodes in the first test snapshot.")
+        raise RuntimeError("No eligible nodes in the first test snapshot.")
 
     target_selection_mode = str(
         attack_cfg.get("target_selection", "model_only_highest_probability")
@@ -232,7 +240,7 @@ def run_low_rate_attack(model, snapshots, cfg, device):
         # consulted below only for post-hoc reporting, never for selection.
         target_node = int(active_candidates[np.argmax(clean_probs[0, active_candidates])])
     elif target_selection_mode == "oracle_highest_score_illicit":
-        oracle_candidates = np.flatnonzero((y0 == 1) & active_first)
+        oracle_candidates = np.flatnonzero((y0 == 1) & candidate_mask)
         if not len(oracle_candidates):
             raise RuntimeError("Oracle target selection requested but no active labeled illicit nodes exist.")
         target_node = int(oracle_candidates[np.argmax(clean_probs[0, oracle_candidates])])
@@ -367,6 +375,7 @@ def run_low_rate_attack(model, snapshots, cfg, device):
             "no_self_loops": True,
             "no_duplicate_directed_edges": True,
             "active_endpoints_only": True,
+            "target_selected_from_new_nodes_when_available": True,
             "source_degree_percentile_cap": float(attack_cfg.get("source_degree_percentile", 95.0)),
             "max_degree_increase_per_node": max_degree_increase,
             "max_degree_distribution_js": max_js_divergence,
