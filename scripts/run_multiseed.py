@@ -78,8 +78,15 @@ def summarize(runs):
             summary["models"][model_name][metric] = _mean_std(
                 run[model_name]["test_metrics"].get(metric) for run in runs
             )
-    summary["attack"]["success_rate_over_steps"] = _mean_std(
+    summary["attack"]["success_rate_over_steps_all_runs"] = _mean_std(
         run["attack"].get("attack_success_rate_over_steps") for run in runs
+    )
+    summary["attack"]["applicable_target_fraction"] = _mean_std(
+        float(bool(run["attack"].get("attack_applicable"))) for run in runs
+    )
+    summary["attack"]["success_rate_over_steps_applicable_only"] = _mean_std(
+        run["attack"].get("attack_success_rate_over_steps")
+        for run in runs if run["attack"].get("attack_applicable")
     )
     summary["attack"]["injected_edges"] = _mean_std(
         run["attack"].get("injected_edges") for run in runs
