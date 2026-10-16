@@ -1,7 +1,13 @@
+import copy
+
 import pandas as pd
 import torch
 
-from slrta.attack.low_rate import _append_edge_to_future_snapshots, _recompute_cumulative_features
+from slrta.attack.low_rate import (
+    _append_edge_to_future_snapshots,
+    _candidate_passes_constraints,
+    _recompute_cumulative_features,
+)
 from slrta.data.clean import load_elliptic
 from slrta.data.io import load_snapshots
 from slrta.data.snapshots import Data, build_dynamic_snapshots
@@ -127,3 +133,41 @@ def test_snapshot_builder_rejects_invalid_window_size(tmp_path):
             str(tmp_path),
             window_size=0,
         )
+
+
+def test_attack_constraints_reject_self_loops_and_duplicate_edges():
+    snapshot = Data(
+        x=torch.zeros((3, 11)),
+        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+        edge_attr=torch.ones((1, 2)),
+        active_mask=torch.ones(3, dtype=torch.bool),
+    )
+    clean = [copy.deepcopy(snapshot)]
+    attacked = [copy.deepcopy(snapshot)]
+
+    self_loop = _candidate_passes_constraints(clean, attacked, 0, 1, 1, {}, 3, 0.5)
+    duplicate = _candidate_passes_constraints(clean, attacked, 0, 0, 1, {}, 3, 0.5)
+
+    assert self_loop[0] is False
+    assert self_loop[2] == "self_loop"
+    assert duplicate[0] is False
+    assert duplicate[2] == "duplicate_edge"
+
+
+def test_attack_constraints_reject_degree_distribution_shift():
+    snapshot = Data(
+        x=torch.zeros((4, 11)),
+        edge_index=torch.empty((2, 0), dtype=torch.long),
+        edge_attr=torch.empty((0, 2)),
+        active_mask=torch.ones(4, dtype=torch.bool),
+    )
+    clean = [copy.deepcopy(snapshot)]
+    attacked = [copy.deepcopy(snapshot)]
+
+    accepted, divergence, reason = _candidate_passes_constraints(
+        clean, attacked, 0, 0, 1, {}, 3, 0.0
+    )
+
+    assert accepted is False
+    assert divergence > 0.0
+    assert reason == "degree_distribution_js"
