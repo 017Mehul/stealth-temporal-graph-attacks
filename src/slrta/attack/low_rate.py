@@ -43,7 +43,18 @@ def evaluate_sequence_f1(model, snapshots, indices, device):
     return compute_binary_metrics(np.concatenate(y_true_all), np.concatenate(y_prob_all))
 
 
-def _recompute_cumulative_features(snapshots, start_index):
+def _append_edge_to_future_snapshots(snapshots, start_index, source, target, amount, timestamp):
+    """Append one intervention to its time step and every later cumulative snapshot."""
+    if start_index < 0 or start_index >= len(snapshots):
+        raise IndexError("start_index is outside the snapshot sequence")
+    new_edge = torch.tensor([[int(source)], [int(target)]], dtype=torch.long)
+    new_attr = torch.tensor([[float(amount), float(timestamp)]], dtype=torch.float32)
+    for future in snapshots[start_index:]:
+        future.edge_index = torch.cat([future.edge_index, new_edge], dim=1)
+        future.edge_attr = torch.cat([future.edge_attr, new_attr], dim=0)
+
+
+def _recompute_cumulative_features(snapshots, start_index=0):
     """Recompute structural features for all cumulative snapshots after intervention."""
     if not snapshots:
         return
@@ -70,7 +81,9 @@ def _recompute_cumulative_features(snapshots, start_index):
             time_sets[d].add(int(ts))
         avg = np.divide(total, counts, out=np.zeros_like(total), where=counts > 0)
         degree = indeg + outdeg
-        frequency = counts / max(1, int(getattr(snap, "time_values", torch.tensor([1])).numel()))
+        # Cumulative frequency uses the number of distinct elapsed event times,
+        # matching the preprocessing pipeline rather than the latest window width.
+        frequency = counts / max(1, int(np.unique(timestamp).size))
         tac = np.asarray([len(x) for x in time_sets], dtype=np.float32)
         base = np.column_stack([indeg, outdeg, total, avg, frequency, tac, degree, np.log1p(degree)])
         # The temporal label-derived feature is intentionally held at zero.
@@ -137,13 +150,10 @@ def run_low_rate_attack(model, snapshots, cfg, device):
 
         for _ in range(budget):
             sampled_amt = float(np.random.uniform(q_low, q_high)) if q_high > q_low else float(q_low)
-            new_edge = torch.tensor([[benign_node], [target_node]], dtype=torch.long)
-            new_attr = torch.tensor([[sampled_amt, ts_val]], dtype=torch.float)
             # Snapshots are cumulative: an intervention persists into every future snapshot.
-            for future_idx in range(snap_idx, len(attacked)):
-                future = attacked[future_idx]
-                future.edge_index = torch.cat([future.edge_index, new_edge], dim=1)
-                future.edge_attr = torch.cat([future.edge_attr, new_attr], dim=0)
+            _append_edge_to_future_snapshots(
+                attacked, snap_idx, benign_node, target_node, sampled_amt, ts_val
+            )
             injected_edges += 1
         _recompute_cumulative_features(attacked, snap_idx)
         current_prob = _predict_indices(model, attacked, [snap_idx], device)[0]
